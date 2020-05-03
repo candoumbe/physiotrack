@@ -1,8 +1,8 @@
 using Bogus;
 using FluentAssertions;
-using Identity.API.Fixtures;
+using Identity.API.Fixtures.v2;
 using Identity.DTO;
-using Identity.DTO.v1;
+using Identity.DTO.v2;
 using MedEasy.IntegrationTests.Core;
 using MedEasy.RestObjects;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -34,9 +34,7 @@ namespace Measures.API.IntegrationTests.v1
         private IdentityApiFixture _identityServer;
         private ITestOutputHelper _outputHelper;
         private const string _endpointUrl = "/v1/bloodpressures";
-        private static readonly JSchema _validationProblemDetailsSchema = new JSchemaGenerator()
-            .Generate(typeof(ValidationProblemDetails));
-
+        
         private static JSchema _pageLink = new JSchema
         {
             Type = JSchemaType.Object,
@@ -111,34 +109,29 @@ namespace Measures.API.IntegrationTests.v1
                 ConfirmPassword = password
             };
 
-            LoginInfo loginInfo = new LoginInfo
-            {
-                Username = newAccountInfo.Username,
-                Password = newAccountInfo.Password
-            };
-
             BearerTokenInfo bearerToken = await _identityServer.Register(newAccountInfo)
                 .ConfigureAwait(false);
-            
+
             using HttpClient client = _sut.CreateClient();
             HttpRequestMessage getAllRequest = new HttpRequestMessage(Get, _endpointUrl);
-            getAllRequest.Headers.Authorization = new AuthenticationHeaderValue(JwtBearerDefaults.AuthenticationScheme, bearerToken.AccessToken);
+            getAllRequest.Headers.Authorization = new AuthenticationHeaderValue(JwtBearerDefaults.AuthenticationScheme, bearerToken.AccessToken.Token);
 
             // Act
             using HttpResponseMessage response = await client.SendAsync(getAllRequest)
-                .ConfigureAwait(false);
+                                                             .ConfigureAwait(false);
 
             // Assert
-            ((int)response.StatusCode).Should().Be(Status200OK);
-            HttpContentHeaders headers = response.Content.Headers;
-
             string json = await response.Content.ReadAsStringAsync()
                 .ConfigureAwait(false);
 
             _outputHelper.WriteLine($"json : {json}");
 
+            ((int)response.StatusCode).Should().Be(Status200OK);
+            HttpContentHeaders headers = response.Content.Headers;
+
             JToken pageResponseToken = JToken.Parse(json);
-            pageResponseToken.IsValid(_pageResponseSchema).Should().BeTrue();
+            pageResponseToken.IsValid(_pageResponseSchema).Should()
+                             .BeTrue();
         }
 
         public static IEnumerable<object[]> GetAll_With_Invalid_Pagination_Returns_BadRequestCases
@@ -175,17 +168,11 @@ namespace Measures.API.IntegrationTests.v1
                 Email = faker.Person.Email
             };
 
-            LoginInfo loginInfo = new LoginInfo
-            {
-                Username = newAccountInfo.Username,
-                Password = newAccountInfo.Password
-            };
-
             BearerTokenInfo bearerToken = await _identityServer.Register(newAccountInfo)
-                .ConfigureAwait(false);
+                                                               .ConfigureAwait(false);
 
             HttpRequestMessage getAllRequest = new HttpRequestMessage(Head, $"{_endpointUrl}?page={page}&pageSize={pageSize}");
-            getAllRequest.Headers.Authorization = new AuthenticationHeaderValue(JwtBearerDefaults.AuthenticationScheme, bearerToken.AccessToken);
+            getAllRequest.Headers.Authorization = new AuthenticationHeaderValue(JwtBearerDefaults.AuthenticationScheme, bearerToken.AccessToken.Token);
 
             using HttpClient client = _sut.CreateClient();
             // Act

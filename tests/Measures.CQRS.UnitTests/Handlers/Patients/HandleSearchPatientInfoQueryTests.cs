@@ -41,13 +41,14 @@ namespace Measures.CQRS.UnitTests.Handlers.Patients
         private Mock<IHandleSearchQuery> _iHandleSearchQueryMock;
         private HandleSearchPatientInfosQuery _sut;
         private Mock<IExpressionBuilder> _expressionBuilderMock;
-        
+
         public HandleSearchPatientInfoQueryTests(ITestOutputHelper outputHelper, SqliteDatabaseFixture database)
         {
             _outputHelper = outputHelper;
 
             DbContextOptionsBuilder<MeasuresContext> builder = new DbContextOptionsBuilder<MeasuresContext>();
-            builder.UseSqlite(database.Connection);
+            //builder.UseSqlite(database.Connection);
+            builder.UseInMemoryDatabase($"{Guid.NewGuid()}");
 
             _uowFactory = new EFUnitOfWorkFactory<MeasuresContext>(builder.Options, (options) => {
                 MeasuresContext context = new MeasuresContext(options);
@@ -56,7 +57,7 @@ namespace Measures.CQRS.UnitTests.Handlers.Patients
             });
 
             _expressionBuilderMock = new Mock<IExpressionBuilder>(Strict);
-            
+
             _iHandleSearchQueryMock = new Mock<IHandleSearchQuery>(Strict);
             _sut = new HandleSearchPatientInfosQuery(_iHandleSearchQueryMock.Object);
         }
@@ -69,7 +70,6 @@ namespace Measures.CQRS.UnitTests.Handlers.Patients
 
             _sut = null;
         }
-
 
         public static IEnumerable<object[]> SearchPatientCases
         {
@@ -93,7 +93,7 @@ namespace Measures.CQRS.UnitTests.Handlers.Patients
                 {
                     Guid patientId = Guid.NewGuid();
                     yield return new object[]
-                   {
+                    {
                         new []
                         {
                             new Patient(Guid.NewGuid(), "bruce wayne"),
@@ -106,12 +106,12 @@ namespace Measures.CQRS.UnitTests.Handlers.Patients
                             Page = 3,
                             PageSize = 1
                         },
-                        ((Expression<Func<Page<PatientInfo>, bool>>)(x => x != null
-                            && x.Entries.Count() == 1
-                            && x.Entries.ElementAt(0).Id == patientId
-                            && x.Count == 3
-                            && x.Size == 1))
-                       };
+                        (Expression<Func<Page<PatientInfo>, bool>>)(x => x != null
+                                                                        && x.Entries.Count() == 1
+                                                                        && x.Entries.ElementAt(0).Id == patientId
+                                                                        && x.Count == 3
+                                                                        && x.Size == 1)
+                    };
                 }
             }
         }
@@ -145,19 +145,19 @@ namespace Measures.CQRS.UnitTests.Handlers.Patients
                .Returns((Type sourceType, Type destinationType, IDictionary<string, object> parameters, MemberInfo[] membersToExpand) => AutoMapperConfig.Build().ExpressionBuilder.GetMapExpression(sourceType, destinationType, parameters, membersToExpand));
 
             _iHandleSearchQueryMock.Setup(mock => mock.Search<Patient, PatientInfo>(It.IsAny<SearchQuery<PatientInfo>>(), It.IsAny<CancellationToken>()))
-                .Returns(async (SearchQuery<PatientInfo> query, CancellationToken ct) => { 
+                .Returns(async (SearchQuery<PatientInfo> query, CancellationToken ct) => {
                     {
-                        using (IUnitOfWork uow = _uowFactory.NewUnitOfWork())
-                        {
-                            Expression<Func<Patient, bool>> filter = query.Data.Filter.ToExpression<Patient>();
-                            Expression<Func<Patient, PatientInfo>> selector = AutoMapperConfig.Build().ExpressionBuilder
-                                .GetMapExpression<Patient, PatientInfo>();
-                            ISort<PatientInfo> sort = (query.Data.Sort?? new Sort<PatientInfo>(nameof(PatientInfo.UpdatedDate), SortDirection.Descending));
+                        Expression<Func<PatientInfo, bool>> filter = query.Data.Filter.ToExpression<PatientInfo>();
+                        Expression<Func<Patient, PatientInfo>> selector = AutoMapperConfig.Build().ExpressionBuilder
+                            .GetMapExpression<Patient, PatientInfo>();
 
-                            return await uow.Repository<Patient>()
-                                .WhereAsync(selector, filter, sort, query.Data.PageSize, query.Data.Page, ct)
-                                .ConfigureAwait(false);
-                        }
+                        //ISort<PatientInfo> sort = (query.Data.Sort ?? );
+
+                        using IUnitOfWork uow = _uowFactory.NewUnitOfWork();
+
+                        return await uow.Repository<Patient>()
+                                        .WhereAsync(selector, filter, new Sort<PatientInfo>(nameof(PatientInfo.UpdatedDate), SortDirection.Descending), query.Data.PageSize, query.Data.Page, ct)
+                                        .ConfigureAwait(false);
                     }
                 });
 

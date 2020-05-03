@@ -87,7 +87,7 @@ namespace Measures.Objects.Tests
 
         [Theory]
         [MemberData(nameof(AddBloodPressureCases))]
-        public void AddingBloodPressure_Should_AddMeasure(Guid measureId, DateTimeOffset dateOfMeasure, float systolic, float diastolic)
+        public void AddingBloodPressure_Should_AddMeasure(Guid measureId, DateTime dateOfMeasure, float systolic, float diastolic)
         {
             // Arrange
             Patient patient = new Patient(Guid.NewGuid(), "John Doe");

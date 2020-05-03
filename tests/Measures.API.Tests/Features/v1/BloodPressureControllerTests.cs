@@ -23,8 +23,10 @@ using MedEasy.DTO.Search;
 using MedEasy.IntegrationTests.Core;
 using MedEasy.RestObjects;
 using MediatR;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.JsonPatch;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -57,7 +59,8 @@ namespace Measures.API.Tests.Features.v1.BloodPressures
         private IUnitOfWorkFactory _uowFactory;
         private static readonly MeasuresApiOptions _apiOptions = new MeasuresApiOptions { DefaultPageSize = 30, MaxPageSize = 200 };
         private Mock<IMediator> _mediatorMock;
-        private Mock<IUrlHelper> _urlHelperMock;
+        private readonly static ApiVersion apiVersion = new ApiVersion(1, 0);
+        private Mock<LinkGenerator> _urlHelperMock;
         private Mock<IOptionsSnapshot<MeasuresApiOptions>> _apiOptionsMock;
         private BloodPressuresController _controller;
         private const string _baseUrl = "http://host/api";
@@ -66,9 +69,9 @@ namespace Measures.API.Tests.Features.v1.BloodPressures
         {
             _outputHelper = outputHelper;
 
-            _urlHelperMock = new Mock<IUrlHelper>(Strict);
-            _urlHelperMock.Setup(mock => mock.Link(It.IsAny<string>(), It.IsAny<object>()))
-                .Returns((string routename, object routeValues) => $"{_baseUrl}/{routename}/?{routeValues?.ToQueryString()}");
+            _urlHelperMock = new Mock<LinkGenerator>(Strict);
+            _urlHelperMock.Setup(mock => mock.GetPathByAddress(It.IsAny<string>(), It.IsAny<RouteValueDictionary>(), It.IsAny<PathString>(), It.IsAny<FragmentString>(), It.IsAny<LinkOptions>()))
+                .Returns((string routename, RouteValueDictionary routeValues, PathString _, FragmentString __, LinkOptions ___) => $"{_baseUrl}/{routename}/?{routeValues?.ToQueryString()}");
 
             _apiOptionsMock = new Mock<IOptionsSnapshot<MeasuresApiOptions>>(Strict);
 
@@ -85,7 +88,7 @@ namespace Measures.API.Tests.Features.v1.BloodPressures
 
             _mediatorMock = new Mock<IMediator>(Strict);
 
-            _controller = new BloodPressuresController(_urlHelperMock.Object, _apiOptionsMock.Object, _mediatorMock.Object);
+            _controller = new BloodPressuresController(_urlHelperMock.Object, _apiOptionsMock.Object, _mediatorMock.Object, apiVersion);
         }
 
         public void Dispose()
@@ -115,15 +118,16 @@ namespace Measures.API.Tests.Features.v1.BloodPressures
                             pageSize, page, // request
                             0,    //expected total
                             (
-                                firstPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x != null && x.Relation == LinkRelation.First  && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=1&pageSize={Math.Min(pageSize, _apiOptions.MaxPageSize) }".Equals(x.Href, OrdinalIgnoreCase)), // expected link to first page
+                                firstPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x != null
+                                    && x.Relation == LinkRelation.First
+                                    && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=1&pageSize={Math.Min(pageSize, _apiOptions.MaxPageSize) }&version={apiVersion}".Equals(x.Href, OrdinalIgnoreCase)), // expected link to first page
                                 previousPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x == null), // expected link to previous page
                                 nextPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x == null), // expected link to next page
-                                lastPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x != null && x.Relation == LinkRelation.Last && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=1&pageSize={Math.Min(pageSize, _apiOptions.MaxPageSize)}".Equals(x.Href, OrdinalIgnoreCase))  // expected link to last page
+                                lastPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x != null && x.Relation == LinkRelation.Last && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=1&pageSize={Math.Min(pageSize, _apiOptions.MaxPageSize)}&version={apiVersion}".Equals(x.Href, OrdinalIgnoreCase))  // expected link to last page
                             )
                         };
                     }
                 }
-
 
                 Faker<BloodPressure> bloodPressureFaker = new Faker<BloodPressure>()
                     .CustomInstantiator(_ => new BloodPressure(
@@ -148,10 +152,10 @@ namespace Measures.API.Tests.Features.v1.BloodPressures
                         (
                             firstPageUrlExpecation : (Expression<Func<Link, bool>>) (x => x != null
                                 && x.Relation == LinkRelation.First
-                                && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=1&pageSize={PaginationConfiguration.DefaultPageSize}".Equals(x.Href, OrdinalIgnoreCase)), // expected link to first page
+                                && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=1&pageSize={PaginationConfiguration.DefaultPageSize}&version={apiVersion}".Equals(x.Href, OrdinalIgnoreCase)), // expected link to first page
                             previousPageUrlExpecation : (Expression<Func<Link, bool>>) (x => x == null), // expected link to previous page
-                            nextPageUrlExpecation : (Expression<Func<Link, bool>>) (x => x != null && x.Relation == "next" && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=2&pageSize={PaginationConfiguration.DefaultPageSize}".Equals(x.Href, OrdinalIgnoreCase)), // expected link to next page
-                            lastPageUrlExpecation : (Expression<Func<Link, bool>>) (x => x != null && x.Relation == LinkRelation.Last && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=14&pageSize={PaginationConfiguration.DefaultPageSize}".Equals(x.Href, OrdinalIgnoreCase))  // expected link to last page
+                            nextPageUrlExpecation : (Expression<Func<Link, bool>>) (x => x != null && x.Relation == "next" && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=2&pageSize={PaginationConfiguration.DefaultPageSize}&version={apiVersion}".Equals(x.Href, OrdinalIgnoreCase)), // expected link to next page
+                            lastPageUrlExpecation : (Expression<Func<Link, bool>>) (x => x != null && x.Relation == LinkRelation.Last && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=14&pageSize={PaginationConfiguration.DefaultPageSize}&version={apiVersion}".Equals(x.Href, OrdinalIgnoreCase))  // expected link to last page
                         )
                     };
                 }
@@ -169,10 +173,10 @@ namespace Measures.API.Tests.Features.v1.BloodPressures
                         10, 1, // request
                         400,    //expected total
                         (
-                            firstPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x != null && x.Relation == LinkRelation.First  && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=1&pageSize=10".Equals(x.Href, OrdinalIgnoreCase)), // expected link to first page
+                            firstPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x != null && x.Relation == LinkRelation.First  && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=1&pageSize=10&version={apiVersion}".Equals(x.Href, OrdinalIgnoreCase)), // expected link to first page
                             previousPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x == null), // expected link to previous page
-                            nextPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x != null && x.Relation == "next" && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=2&pageSize=10".Equals(x.Href, OrdinalIgnoreCase)), // expected link to next page
-                            lastPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x != null && x.Relation == LinkRelation.Last && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=40&pageSize=10".Equals(x.Href, OrdinalIgnoreCase))  // expected link to last page
+                            nextPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x != null && x.Relation == "next" && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=2&pageSize=10&version={apiVersion}".Equals(x.Href, OrdinalIgnoreCase)), // expected link to next page
+                            lastPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x != null && x.Relation == LinkRelation.Last && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=40&pageSize=10&version={apiVersion}".Equals(x.Href, OrdinalIgnoreCase))  // expected link to last page
                         )
                     };
                 }
@@ -186,10 +190,14 @@ namespace Measures.API.Tests.Features.v1.BloodPressures
                         PaginationConfiguration.DefaultPageSize, 1, // request
                         1,    //expected total
                         (
-                            firstPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x != null && x.Relation == LinkRelation.First && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=1&pageSize={PaginationConfiguration.DefaultPageSize}".Equals(x.Href, OrdinalIgnoreCase)), // expected link to first page
+                            firstPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x != null
+                                && x.Relation == LinkRelation.First
+                                && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=1&pageSize={PaginationConfiguration.DefaultPageSize}&version={apiVersion}".Equals(x.Href, OrdinalIgnoreCase)), // expected link to first page
                             previousPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x == null), // expected link to previous page
                             nextPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x == null), // expected link to next page
-                            lastPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x != null && x.Relation == LinkRelation.Last && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=1&pageSize={PaginationConfiguration.DefaultPageSize}".Equals(x.Href, OrdinalIgnoreCase)) // expected link to last page
+                            lastPageUrlExpectation : (Expression<Func<Link, bool>>) (x => x != null
+                                && x.Relation == LinkRelation.Last
+                                && $"{_baseUrl}/{RouteNames.DefaultGetAllApi}/?controller={BloodPressuresController.EndpointName}&page=1&pageSize={PaginationConfiguration.DefaultPageSize}&version={apiVersion}".Equals(x.Href, OrdinalIgnoreCase)) // expected link to last page
                         )
                     };
                 }
@@ -231,7 +239,7 @@ namespace Measures.API.Tests.Features.v1.BloodPressures
                     });
 
             // Act
-            IActionResult actionResult = await _controller.Get(new PaginationConfiguration { PageSize = pageSize, Page = page })
+            IActionResult actionResult = await _controller.Get(page: page, pageSize : pageSize)
                 .ConfigureAwait(false);
 
             // Assert
@@ -503,28 +511,26 @@ namespace Measures.API.Tests.Features.v1.BloodPressures
             _apiOptionsMock.Setup(mock => mock.Value)
                 .Returns(new MeasuresApiOptions { MaxPageSize = apiOptions.maxPageSize, DefaultPageSize = apiOptions.defaultPageSize });
             _mediatorMock.Setup(mock => mock.Send(It.IsAny<SearchQuery<BloodPressureInfo>>(), It.IsAny<CancellationToken>()))
-                .Returns(async (SearchQuery<BloodPressureInfo> request, CancellationToken cancellationToken) =>
+                .Returns((SearchQuery<BloodPressureInfo> request, CancellationToken cancellationToken) =>
                 {
-                    using (IUnitOfWork uow = _uowFactory.NewUnitOfWork())
-                    {
-                        SearchQueryInfo<BloodPressureInfo> search = request.Data;
-                        Expression<Func<BloodPressure, bool>> filter = search.Filter?.ToExpression<BloodPressure>() ?? (_ => true);
-                        Expression<Func<BloodPressure, BloodPressureInfo>> selector = AutoMapperConfig.Build().ExpressionBuilder.GetMapExpression<BloodPressure, BloodPressureInfo>();
+                    using IUnitOfWork uow = _uowFactory.NewUnitOfWork();
+                    SearchQueryInfo<BloodPressureInfo> search = request.Data;
+                    Expression<Func<BloodPressure, bool>> filter = search.Filter?.ToExpression<BloodPressure>() ?? (_ => true);
+                    Expression<Func<BloodPressure, BloodPressureInfo>> selector = AutoMapperConfig.Build().ExpressionBuilder.GetMapExpression<BloodPressure, BloodPressureInfo>();
 
-                        return await uow.Repository<BloodPressure>()
-                            .WhereAsync(
-                                selector,
-                                filter,
-                                search.Sort,
-                                search.PageSize,
-                                search.Page,
-                                cancellationToken)
-                            .ConfigureAwait(false);
-                    }
+                    return uow.Repository<BloodPressure>()
+                              .WhereAsync(
+                                    selector,
+                                    filter,
+                                    search.Sort,
+                                    search.PageSize,
+                                    search.Page,
+                                    cancellationToken)
+                              .AsTask();
                 });
             // Act
             IActionResult actionResult = await _controller.Search(query)
-                .ConfigureAwait(false);
+                                                          .ConfigureAwait(false);
 
             // Assert
             actionResult.Should()
@@ -574,27 +580,26 @@ namespace Measures.API.Tests.Features.v1.BloodPressures
             }
 
             _mediatorMock.Setup(mock => mock.Send(It.IsAny<GetBloodPressureInfoByIdQuery>(), It.IsAny<CancellationToken>()))
-                .Returns(async (GetBloodPressureInfoByIdQuery query, CancellationToken cancellationToken) =>
+                .Returns((GetBloodPressureInfoByIdQuery query, CancellationToken cancellationToken) =>
                 {
-                    using (IUnitOfWork uow = _uowFactory.NewUnitOfWork())
-                    {
-                        Expression<Func<BloodPressure, BloodPressureInfo>> selector = AutoMapperConfig.Build().ExpressionBuilder.GetMapExpression<BloodPressure, BloodPressureInfo>();
+                    using IUnitOfWork uow = _uowFactory.NewUnitOfWork();
+                    Expression<Func<BloodPressure, BloodPressureInfo>> selector = AutoMapperConfig.Build().ExpressionBuilder.GetMapExpression<BloodPressure, BloodPressureInfo>();
 
-                        return await uow.Repository<BloodPressure>()
-                            .SingleOrDefaultAsync(
-                                selector,
-                                (BloodPressure x) => x.Id == query.Data,
-                                cancellationToken)
-                            .ConfigureAwait(false);
-                    }
+                    return uow.Repository<BloodPressure>()
+                              .SingleOrDefaultAsync(
+                                    selector,
+                                    (BloodPressure x) => x.Id == query.Data,
+                                    cancellationToken)
+                              .AsTask();
                 });
 
             // Act
             IActionResult actionResult = await _controller.Get(measureId)
-                .ConfigureAwait(false);
+                                                          .ConfigureAwait(false);
 
             // Assert
             _mediatorMock.Verify(mock => mock.Send(It.Is<GetBloodPressureInfoByIdQuery>(q => q.Data == measureId), It.IsAny<CancellationToken>()), Times.Once);
+            _mediatorMock.VerifyNoOtherCalls();
 
             Browsable<BloodPressureInfo> browsableResource = actionResult.Should()
                 .BeAssignableTo<OkObjectResult>().Which
@@ -616,19 +621,19 @@ namespace Measures.API.Tests.Features.v1.BloodPressures
 
             BloodPressureInfo resource = browsableResource.Resource;
             self.Href.Should()
-                .BeEquivalentTo($"{_baseUrl}/{RouteNames.DefaultGetOneByIdApi}/?controller={BloodPressuresController.EndpointName}&{nameof(resource.Id)}={resource.Id}");
+                .BeEquivalentTo($"{_baseUrl}/{RouteNames.DefaultGetOneByIdApi}/?controller={BloodPressuresController.EndpointName}&{nameof(resource.Id)}={resource.Id}&version={apiVersion}");
 
             Link delete = browsableResource.Links.Single(x => x.Relation == "delete");
             delete.Method.Should()
                 .Be("DELETE");
             delete.Href.Should()
-                .BeEquivalentTo($"{_baseUrl}/{RouteNames.DefaultGetOneByIdApi}/?controller={BloodPressuresController.EndpointName}&{nameof(resource.Id)}={resource.Id}");
+                .BeEquivalentTo($"{_baseUrl}/{RouteNames.DefaultGetOneByIdApi}/?controller={BloodPressuresController.EndpointName}&{nameof(resource.Id)}={resource.Id}&version={apiVersion}");
 
             Link linkToPatient = browsableResource.Links.Single(x => x.Relation == "patient");
             linkToPatient.Method.Should()
                 .Be("GET");
             linkToPatient.Href.Should()
-                .BeEquivalentTo($"{_baseUrl}/{RouteNames.DefaultGetOneByIdApi}/?controller={PatientsController.EndpointName}&{nameof(PatientInfo.Id)}={resource.PatientId}");
+                .BeEquivalentTo($"{_baseUrl}/{RouteNames.DefaultGetOneByIdApi}/?controller={PatientsController.EndpointName}&{nameof(PatientInfo.Id)}={resource.PatientId}&version={apiVersion}");
 
             resource.Id.Should().Be(measureId);
             resource.SystolicPressure.Should().Be(150);

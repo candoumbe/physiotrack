@@ -1,41 +1,46 @@
 using FluentAssertions;
 using FluentAssertions.Extensions;
+
+using Identity.API.Fixtures.v2;
 using Identity.DTO;
+using Identity.DTO.v2;
+
 using Measures.API.Features.Patients;
 using Measures.DTO;
+
 using MedEasy.IntegrationTests.Core;
 using MedEasy.RestObjects;
+
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Testing;
+
 using Newtonsoft.Json.Linq;
 using Newtonsoft.Json.Schema;
+using Superpower.Parsers;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading.Tasks;
+
 using Xunit;
 using Xunit.Abstractions;
 using Xunit.Categories;
+
 using static Microsoft.AspNetCore.Http.StatusCodes;
 using static Newtonsoft.Json.JsonConvert;
 using static System.Net.Http.HttpMethod;
-using Measures.API;
-using Identity.DTO.v2;
-using Identity.API.Fixtures.v2;
 
 namespace Measures.API.IntegrationTests.v1
 {
     [IntegrationTest]
     [Feature("Patients")]
-    [Consumes("application/json")]
-    public class PatientsControllerTests : IDisposable, IClassFixture<IntegrationFixture<Startup>>, IClassFixture<IdentityApiFixture>
+    public class PatientsControllerTests : IClassFixture<IntegrationFixture<Startup>>, IClassFixture<IdentityApiFixture>
     {
-        private IntegrationFixture<Startup> _server;
-        private ITestOutputHelper _outputHelper;
-        private IdentityApiFixture _identityServer;
+        private readonly IntegrationFixture<Startup> _server;
+        private readonly ITestOutputHelper _outputHelper;
+        private readonly IdentityApiFixture _identityServer;
         private const string _version = "v1";
         private readonly static string _baseUrl = $"/{_version}/patients";
 
@@ -109,12 +114,6 @@ namespace Measures.API.IntegrationTests.v1
             _identityServer = identityFixture;
         }
 
-        public void Dispose()
-        {
-            _outputHelper = null;
-            _server = null;
-            _identityServer = null;
-        }
 
         [Fact]
         public async Task GetAll_With_No_Data()
@@ -131,11 +130,7 @@ namespace Measures.API.IntegrationTests.v1
             BearerTokenInfo bearerToken = await _identityServer.Register(newAccountInfo)
                 .ConfigureAwait(false);
 
-            LoginInfo loginInfo = new LoginInfo
-            {
-                Username = newAccountInfo.Username,
-                Password = newAccountInfo.Password
-            };
+            _outputHelper.WriteLine($"Token : {bearerToken.Jsonify()}");
 
             using HttpClient client = _server.CreateClient();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(JwtBearerDefaults.AuthenticationScheme, bearerToken.AccessToken.Token);
@@ -274,7 +269,7 @@ namespace Measures.API.IntegrationTests.v1
 
                 ValidationProblemDetails errorObject = token.ToObject<ValidationProblemDetails>();
                 errorObject.Title.Should()
-                    .Be("Validation failed");
+                           .NotBeNullOrWhiteSpace();
                 errorObject.Errors.Should()
                     .HaveCount(1).And
                     .ContainKey("id").WhichValue.Should()
@@ -469,6 +464,9 @@ namespace Measures.API.IntegrationTests.v1
 
             BearerTokenInfo bearerToken = await _identityServer.Register(newAccountInfo)
                 .ConfigureAwait(false);
+
+            _outputHelper.WriteLine($"Token : {bearerToken.Jsonify()}");
+
             using HttpClient client = _server.CreateClient();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(JwtBearerDefaults.AuthenticationScheme, bearerToken.AccessToken.Token);
 
@@ -492,7 +490,7 @@ namespace Measures.API.IntegrationTests.v1
             response.IsSuccessStatusCode.Should()
                 .BeFalse(reason);
             ((int)response.StatusCode).Should()
-                .Be(Status422UnprocessableEntity, reason);
+                .Be(Status400BadRequest, reason);
             response.ReasonPhrase.Should()
                 .NotBeNullOrWhiteSpace();
 
@@ -523,41 +521,38 @@ namespace Measures.API.IntegrationTests.v1
             };
 
             BearerTokenInfo bearerToken = await _identityServer.Register(newAccountInfo)
-                .ConfigureAwait(false);
-
-            LoginInfo loginInfo = new LoginInfo
-            {
-                Username = newAccountInfo.Username,
-                Password = newAccountInfo.Password
-            };
+                                                               .ConfigureAwait(false);
 
             using HttpClient client = _server.CreateClient();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(JwtBearerDefaults.AuthenticationScheme, bearerToken.AccessToken.Token);
 
             HttpResponseMessage response = await client.PostAsJsonAsync(_baseUrl, newPatient)
-                .ConfigureAwait(false);
+                                                       .ConfigureAwait(false);
 
             _outputHelper.WriteLine($"HTTP create patient status code : {response.StatusCode}");
 
             string json = await response.Content.ReadAsStringAsync()
-                .ConfigureAwait(false);
+                                                .ConfigureAwait(false);
+
             _outputHelper.WriteLine($"json : {json}");
             IEnumerable<Link> patientLinks = JToken.Parse(json)[nameof(Browsable<PatientInfo>.Links).ToLower()].ToObject<IEnumerable<Link>>();
             IEnumerable<Link> linksToGetData = patientLinks.Where(x => x.Method == "GET" || x.Method == "HEAD");
 
             using HttpClient client2 = _server.CreateClient();
+            _outputHelper.WriteLine($"Checking links accessibility");
             foreach (Link link in linksToGetData)
             {
+                _outputHelper.WriteLine($"Link under test : {link}");
                 HttpRequestMessage headRequestMessage = new HttpRequestMessage
                 {
                     Method = Head,
-                    RequestUri = new Uri(link.Href)
+                    RequestUri = new Uri(link.Href, UriKind.RelativeOrAbsolute)
                 };
                 headRequestMessage.Headers.Authorization = new AuthenticationHeaderValue(JwtBearerDefaults.AuthenticationScheme, bearerToken.AccessToken.Token);
 
                 // Act
                 response = await client2.SendAsync(headRequestMessage)
-                    .ConfigureAwait(false);
+                                        .ConfigureAwait(false);
 
                 // Assert
                 _outputHelper.WriteLine($"HTTP HEAD <{link.Href}> status code : <{response.StatusCode}>");
