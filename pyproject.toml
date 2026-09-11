@@ -1,0 +1,21 @@
+[project]
+name = "physiotrack"
+version = "0.1.0"
+description = "Add your description here"
+authors = [
+    { name = "Cyrille NDOUMBE", email = "candoumbe@users.noreply.github.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "httpx",
+    "pytest",
+]
