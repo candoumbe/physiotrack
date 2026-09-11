@@ -224,6 +224,18 @@ mixed all features' routers together, all features' schemas together, etc.
 - Tester: test files can remain flat under `test/` for now (mirroring feature names, e.g. a
   future `test/test_measurements.py`), no vertical-slice requirement imposed on tests.
 
+### 2026-09-11: Added Makefile with ruff as lint/format backend
+**By:** Lead
+**What:** Created a repository-root `Makefile` (targets: `install`/`sync`, `run`, `test`,
+`lint`, `format`, `clean`, `help`, `help` as default goal). No linter/formatter was
+configured in `pyproject.toml`, so `ruff` was added as a dev dependency
+(`uv add --dev ruff`) to back the `lint` (`ruff check .`) and `format` (`ruff format .`)
+targets.
+**Why:** The task explicitly allowed adding `ruff` as a sensible default when no
+linter/formatter is configured. Ruff is fast, widely adopted in the Python/uv ecosystem,
+and covers both linting and formatting with a single dependency, avoiding the need for
+separate flake8/black tooling.
+
 ## Governance
 
 - All meaningful changes require team consensus

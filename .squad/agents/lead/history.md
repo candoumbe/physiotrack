@@ -33,3 +33,12 @@
 - Created `README.md` at repo root: project purpose, implemented vs designed
   features, tech stack, project structure, getting-started commands, and a
   pointer to `CHANGELOG.md`.
+
+## 2026-09-11 — Makefile + ruff added
+
+- Created repository-root `Makefile` (`install`, `run`, `test`, `lint`, `format`,
+  `clean`, `help` targets, `help` as default goal).
+- Added `ruff` as a dev dependency to back `lint`/`format` (no linter/formatter
+  was previously configured).
+- Updated `README.md` and `CHANGELOG.md` to reference the Makefile.
+- Verified via `make install`, `make test` (1 passed), `make clean`, `make help`.
