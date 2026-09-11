@@ -1,0 +1,43 @@
+{
+  "name": "Physiotrack",
+  "image": "mcr.microsoft.com/vscode/devcontainers/python:3.14",
+  "features": {
+    "ghcr.io/va-h/devcontainers-features/uv": {},
+    "ghcr.io/devcontainers/features/node:2.1.0": {},
+    "ghcr.io/devcontainers/features/git:1.3.8": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/copilot-cli:1.1.3": {},
+    "ghcr.io/nils-geistmann/devcontainers-features/zsh": {
+      "plugins": "git npm gh ng python"
+    }
+  },
+  "containerEnv": {
+    "TESTCONTAINERS_RYUK_CONTAINER_PRIVILEGED": "false",
+    "IS_DEVCONTAINER": "true"
+  },
+  "postCreateCommand": "bash ./.devcontainer/scripts/post-create.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-azuretools.vscode-docker",
+				"angular.ng-template",
+				"esbenp.prettier-vscode",
+				"microsoft-aspire.aspire-vscode",
+				"GitHub.copilot",
+				"EditorConfig.EditorConfig",
+				"mhutchie.git-graph",
+				"zaaack.markdown-editor",
+				"adrianwilczynski.user-secrets",
+				"github.vscode-github-actions"
+			],
+			"settings": {
+				"chat.tools.compressOutput.enabled": true,
+				"chat.tools.riskAssessment.enabled": true,
+				"chat.permissions.default": "autoApprove",
+				"aspire.dashboardBrowser": "integratedBrowser",
+				"aspire.closeDashboardOnDebugEnd": true
+			}
+		}
+  }
+}
