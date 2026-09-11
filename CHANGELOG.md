@@ -28,5 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Migrated package management from pip to uv (`pyproject.toml`, `uv.lock`)
 - Reorganized project code to follow vertical slice architecture (`src/features/health`,
   `src/features/measurements`)
+- Added a `Makefile` wrapping common project tasks (`install`, `run`, `test`, `lint`,
+  `format`, `clean`, `help`), and added `ruff` as a dev dependency to back the `lint`
+  and `format` targets
 
 [Unreleased]: https://github.com/candoumbe/physiotrack/commits/HEAD

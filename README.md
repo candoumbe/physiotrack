@@ -48,23 +48,30 @@ src/
 
 ## Getting started
 
+A `Makefile` wraps the common project tasks. Run `make help` to list all available
+targets.
+
 Install dependencies:
 
 ```bash
-uv sync
+make install
 ```
 
 Run the API:
 
 ```bash
-uv run uvicorn main:app --reload --app-dir src
+make run
 ```
 
 Run tests:
 
 ```bash
-uv run pytest
+make test
 ```
+
+Each target is a thin wrapper around the underlying `uv` command (e.g. `make install`
+runs `uv sync`, `make run` runs `uv run uvicorn main:app --reload --app-dir src`, `make
+test` runs `uv run pytest`). You can still invoke `uv` directly if you need more control.
 
 ## Changelog
 
