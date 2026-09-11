@@ -18,4 +18,5 @@ package = false
 dev = [
     "httpx",
     "pytest",
+    "ruff>=0.16.7",
 ]
