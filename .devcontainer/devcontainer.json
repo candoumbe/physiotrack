@@ -21,16 +21,16 @@
       "extensions": [
         "ms-python.python",
         "ms-azuretools.vscode-docker",
-				"angular.ng-template",
-				"esbenp.prettier-vscode",
-				"microsoft-aspire.aspire-vscode",
-				"GitHub.copilot",
-				"EditorConfig.EditorConfig",
-				"mhutchie.git-graph",
-				"zaaack.markdown-editor",
-				"adrianwilczynski.user-secrets",
-				"github.vscode-github-actions"
-			],
+        "esbenp.prettier-vscode",
+        "microsoft-aspire.aspire-vscode",
+        "GitHub.copilot",
+        "EditorConfig.EditorConfig",
+        "mhutchie.git-graph",
+        "zaaack.markdown-editor",
+        "adrianwilczynski.user-secrets",
+        "github.vscode-github-actions",
+        "ms-vscode.makefile-tools"
+      ],
 			"settings": {
 				"chat.tools.compressOutput.enabled": true,
 				"chat.tools.riskAssessment.enabled": true,
