@@ -44,10 +44,6 @@ class ActivityMeasurement(MeasurementBase):
 
 
 Measurement = Annotated[
-<<<<<<< HEAD
     HeartRateMeasurement | SleepMeasurement | ActivityMeasurement,
-=======
-    Union[HeartRateMeasurement, SleepMeasurement, ActivityMeasurement],
->>>>>>> 12c900a (feat: add pydantic schemas for physiological measurements)
     Field(discriminator="type"),
 ]
