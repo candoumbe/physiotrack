@@ -6,7 +6,7 @@ fields per measurement type will be finalized by Backend Dev / Data Engineer.
 
 from datetime import datetime
 from enum import Enum
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -44,6 +44,6 @@ class ActivityMeasurement(MeasurementBase):
 
 
 Measurement = Annotated[
-    Union[HeartRateMeasurement, SleepMeasurement, ActivityMeasurement],
+    HeartRateMeasurement | SleepMeasurement | ActivityMeasurement,
     Field(discriminator="type"),
 ]
