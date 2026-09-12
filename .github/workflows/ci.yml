@@ -1,4 +1,4 @@
-name: CI
+name: physiotrack - CI
 
 on:
   push:
@@ -6,11 +6,14 @@ on:
       - main
       - develop
       - 'release/**'
+      - 'hotfix/**'
+      - 'feature/**'
+      - 'chore/**'
+      - 'coldfix/**'
   pull_request:
     branches:
       - main
       - develop
-      - 'release/**'
 
 env:
   REGISTRY: ghcr.io/${{ github.repository_owner }}
