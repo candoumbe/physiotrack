@@ -1,0 +1,17 @@
+.git
+.github
+.venv
+.vscode
+.devcontainer
+.copilot
+.squad
+.env
+test
+**/__pycache__
+.pytest_cache
+.ruff_cache
+*.egg-info
+dist
+build
+Dockerfile
+.dockerignore
