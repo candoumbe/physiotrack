@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'release/**'
+  pull_request:
+    branches:
+      - main
+      - develop
+      - 'release/**'
+
+env:
+  REGISTRY: ghcr.io/${{ github.repository_owner }}
+  IMAGE: physiotrack-api
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  quality:
+    name: Lint & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - run: make install
+      - run: make lint
+      - run: make test
+
+  image:
+    name: Build & publish image
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate version
+        run: make check-version
+
+      - name: Build image
+        run: make docker-build BRANCH=${{ github.head_ref || github.ref_name }} REGISTRY=${{ env.REGISTRY }} IMAGE=${{ env.IMAGE }}
+
+      - name: List tags
+        run: make docker-tags BRANCH=${{ github.head_ref || github.ref_name }} REGISTRY=${{ env.REGISTRY }} IMAGE=${{ env.IMAGE }}
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image
+        # push on push events and (branch is on develop, main, or release branches or a pull request targets these branches)
+        if: github.event_name == 'push' && (github.ref_name == 'develop' || github.ref_name == 'main' || startsWith(github.ref_name, 'release/'))
+        run: make docker-push BRANCH=${{ github.ref_name }} REGISTRY=${{ env.REGISTRY }} IMAGE=${{ env.IMAGE }}

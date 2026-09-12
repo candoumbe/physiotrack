@@ -1,0 +1,10 @@
+{
+  "universe_usage_history": ["descriptive"],
+  "assignment_cast_snapshots": {
+    "2026-09-11-physiotrack": {
+      "universe": "descriptive",
+      "members": ["lead", "backend-dev", "data-engineer", "security", "tester"]
+    }
+  }
+}
+
