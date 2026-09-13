@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### API
 
 - Added `GET /health` endpoint returning API status and timestamp
+- feat(telemetry): added OpenTelemetry support for API instrumentation — tracing, metrics
+  and log correlation via FastAPI auto-instrumentation, configured entirely through
+  standard `OTEL_*` environment variables (Aspire-injected, no hardcoded endpoint)
 
 ### 📝 Documentation
 
