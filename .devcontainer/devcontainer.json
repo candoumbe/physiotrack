@@ -36,7 +36,9 @@
 				"chat.tools.riskAssessment.enabled": true,
 				"chat.permissions.default": "autoApprove",
 				"aspire.dashboardBrowser": "integratedBrowser",
-				"aspire.closeDashboardOnDebugEnd": true
+				"aspire.closeDashboardOnDebugEnd": true,
+        "python.venvPath": "./.venv",
+        "python.pythonPath": "./.venv/bin/python"
 			}
 		}
   }
