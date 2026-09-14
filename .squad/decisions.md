@@ -1,5 +1,17 @@
 # Squad Decisions
 
+### 2026-09-14T00:00:00Z: API pagination convention — all collection endpoints must be paginated
+**By:** Cyrille NDOUMBE (via Copilot) — cross-squad directive, see root `.squad/decisions.md`
+**What:** Any API endpoint returning a list/collection of resources must return paginated content, unless the user explicitly asks for no pagination.
+- Query params: `page` (1-based) and `pageSize`.
+- Server enforces a default page size (50) and a configurable max page size (200) — page size is always the backend's responsibility.
+- Response body shape: `{ "items": [...], "links": { "prev": {"href", "rel"}, "next": {...}, "first": {...}, "last": {...} }, "total": <int> }`.
+- Response headers: `Link` (prev/next), `X-Count`, `X-Total-Count`.
+- HTTP status: `200 OK` for a single page, `206 Partial Content` when the result spans multiple pages; standard 2XX/3XX/4XX/5XX families otherwise apply.
+- If pagination parameter names/index start aren't already fixed, ask the user before implementing.
+**Why:** User directive to standardize collection API responses across the whole monorepo.
+
+
 ## Active Decisions
 
 ### 2026-09-11: Architecture — physiological measurement recording
