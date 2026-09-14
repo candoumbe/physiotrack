@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### API
 
 - Added `GET /health` endpoint returning API status and timestamp
+- Added subject-scoped measurement endpoints: `POST /subjects/{subject_id}/measurements` creates a measurement and `GET /subjects/{subject_id}/measurements` lists measurements for a subject
+- Added measurement list filtering by `type`, offset-based pagination with `limit` and `offset`, and `next`/`previous` pagination links
 
 ### 📝 Documentation
 
@@ -18,10 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   measurements, discriminated-union schema, generic `POST`/`GET` endpoints)
 - Added Pydantic schema skeleton for measurements (common base schema + heart rate,
   sleep and activity types)
+- Extended measurement schemas with type-specific values and blood pressure measurements
 
 ### 🧪 Tests
 
 - Added `test/test_health.py` covering the health endpoint
+- Added `test/test_measurements.py` covering measurement creation and listing, subject
+  association, type filtering, and pagination metadata and links
 
 ### 🧹 Housekeeping
 
@@ -31,5 +36,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a `Makefile` wrapping common project tasks (`install`, `run`, `test`, `lint`,
   `format`, `clean`, `help`), and added `ruff` as a dev dependency to back the `lint`
   and `format` targets
+- Recorded the offset-based pagination convention for measurement lists
 
 [Unreleased]: https://github.com/candoumbe/physiotrack/commits/HEAD
