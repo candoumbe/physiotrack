@@ -11,10 +11,11 @@ register_problem_details_handlers(app)
 app.include_router(health_router)
 app.include_router(measurements_router)
 
-
 if __name__ == "__main__":
-    import uvicorn
     import os
+    
+    import uvicorn
+
     # Get the port to use from PORT environment variable
-    port = int(os.getenv("PORT", 8000))
+    port = int(os.getenv("PORT", "8000"))
     uvicorn.run(app, host="0.0.0.0", port=port)
