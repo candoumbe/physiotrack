@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### API
 
 - Added `GET /health` endpoint returning API status and timestamp
+- Standardized HTTP error responses as RFC 7807 Problem Details with the
+  `application/problem+json` media type, including validation, routing, explicit
+  API, and sanitized internal server errors
 - Added subject-scoped measurement endpoints: `POST /subjects/{subject_id}/measurements` creates a measurement and `GET /subjects/{subject_id}/measurements` lists measurements for a subject
 - Added measurement list filtering by `type`, offset-based pagination with `limit` and `offset`, and `next`/`previous` pagination links
 
@@ -25,8 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### 🧪 Tests
 
 - Added `test/test_health.py` covering the health endpoint
-- Added `test/test_measurements.py` covering measurement creation and listing, subject
-  association, type filtering, and pagination metadata and links
+- Added focused Problem Details coverage for validation, conflict, not-found,
+  method-not-allowed, and unexpected server errors
 
 ### 🧹 Housekeeping
 
