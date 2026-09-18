@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🧹 Housekeeping
 
+- Added Makefile Gitflow automation for feature, chore, coldfix, release, and hotfix branch workflows, including validation, versioning, merging, and tagging
 - Migrated package management from pip to uv (`pyproject.toml`, `uv.lock`)
 - Reorganized project code to follow vertical slice architecture (`src/features/health`,
   `src/features/measurements`)
