@@ -31,7 +31,7 @@ CHANNEL ?= $(shell \
 	fi \
 )
 
-.PHONY: install sync run test lint format clean help version check-version docker-tags docker-build docker-push docker-run feature chore coldfix release hotfix
+.PHONY: install sync run migrate-up migrate-down migrate-status test lint format clean help version check-version docker-tags docker-build docker-push docker-run feature chore coldfix release hotfix
 
 BASE_BRANCH ?= develop
 HOTFIX_BASE_BRANCH ?= main
@@ -43,6 +43,15 @@ sync: install ## Alias for install
 
 run: ## Run the API with auto-reload
 	uv run uvicorn main:app --reload --app-dir src
+
+migrate-up: ## Apply schema migrations (default: head; optional REVISION=...)
+	uv run --project migrator --frozen physiotrack-migrator up$(if $(strip $(REVISION)), --revision "$(REVISION)")
+
+migrate-down: ## Destructive schema rollback (default: base; optional REVISION=...)
+	uv run --project migrator --frozen physiotrack-migrator down$(if $(strip $(REVISION)), --revision "$(REVISION)")
+
+migrate-status: ## Show the current schema revision without changing it
+	uv run --project migrator --frozen physiotrack-migrator status
 
 test: ## Run the test suite
 	uv run pytest
