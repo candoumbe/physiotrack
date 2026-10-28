@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### 🚀 New features
 
+#### Schema migrations
+
+- Added an independently installable Python >=3.14 PostgreSQL schema migrator
+  with locked Alembic, SQLAlchemy Core and Psycopg dependencies, `up`/`down`/`status`
+  commands, dedicated target validation, transactional rollback, a separate
+  non-root Docker image and disposable PostgreSQL contract tests. The API remains
+  in-memory and does not depend on the migrator.
+
 #### API
 
 - Added `GET /health` endpoint returning API status and timestamp
