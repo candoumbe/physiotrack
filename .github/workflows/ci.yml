@@ -38,6 +38,21 @@ jobs:
       - run: make lint
       - run: make test
 
+  migrator-quality:
+    name: Standalone migrator lint, PostgreSQL & image tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
+
+      - run: uv sync --project migrator --frozen
+      - run: uv run --project migrator --frozen ruff check migrator
+      - run: uv run --project migrator --frozen ruff format --check migrator
+      - run: uv run --project migrator --frozen pytest -c migrator/pyproject.toml migrator/tests
+
   image:
     name: Build & publish image
     runs-on: ubuntu-latest
