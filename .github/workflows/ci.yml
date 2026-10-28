@@ -18,6 +18,7 @@ on:
 env:
   REGISTRY: ghcr.io/${{ github.repository_owner }}
   IMAGE: physiotrack-api
+  MIGRATOR_IMAGE: physiotrack-migrator
 
 permissions:
   contents: read
@@ -54,9 +55,9 @@ jobs:
       - run: uv run --project migrator --frozen pytest -c migrator/pyproject.toml migrator/tests
 
   image:
-    name: Build & publish image
+    name: Build & publish API and migrator images
     runs-on: ubuntu-latest
-    needs: quality
+    needs: [quality, migrator-quality]
     steps:
       - uses: actions/checkout@v7
 
@@ -64,10 +65,10 @@ jobs:
         run: make check-version
 
       - name: Build image
-        run: make docker-build BRANCH=${{ github.head_ref || github.ref_name }} REGISTRY=${{ env.REGISTRY }} IMAGE=${{ env.IMAGE }}
+        run: make docker-build BRANCH=${{ github.head_ref || github.ref_name }} REGISTRY=${{ env.REGISTRY }} IMAGE=${{ env.IMAGE }} MIGRATOR_IMAGE=${{ env.MIGRATOR_IMAGE }}
 
       - name: List tags
-        run: make docker-tags BRANCH=${{ github.head_ref || github.ref_name }} REGISTRY=${{ env.REGISTRY }} IMAGE=${{ env.IMAGE }}
+        run: make docker-tags BRANCH=${{ github.head_ref || github.ref_name }} REGISTRY=${{ env.REGISTRY }} IMAGE=${{ env.IMAGE }} MIGRATOR_IMAGE=${{ env.MIGRATOR_IMAGE }}
 
       - name: Log in to GHCR
         if: >-
@@ -79,9 +80,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push image
+      - name: Push images
         # Push on merges/pushes to main/develop, direct pushes to release/* branches, and PRs targeting main/develop
         if: >-
           (github.event_name == 'push' && (github.ref_name == 'develop' || github.ref_name == 'main' || startsWith(github.ref_name, 'release/'))) ||
           (github.event_name == 'pull_request' && (github.base_ref == 'develop' || github.base_ref == 'main'))
-        run: make docker-push BRANCH=${{ github.head_ref || github.ref_name }} REGISTRY=${{ env.REGISTRY }} IMAGE=${{ env.IMAGE }}
+        run: make docker-push BRANCH=${{ github.head_ref || github.ref_name }} REGISTRY=${{ env.REGISTRY }} IMAGE=${{ env.IMAGE }} MIGRATOR_IMAGE=${{ env.MIGRATOR_IMAGE }}

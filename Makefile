@@ -6,8 +6,10 @@ endif
 
 # Image coordinates. REGISTRY is empty by default so local builds stay local.
 IMAGE ?= physiotrack-api
+MIGRATOR_IMAGE ?= physiotrack-migrator
 REGISTRY ?=
 IMAGE_REF := $(if $(REGISTRY),$(REGISTRY)/$(IMAGE),$(IMAGE))
+MIGRATOR_IMAGE_REF := $(if $(REGISTRY),$(REGISTRY)/$(MIGRATOR_IMAGE),$(MIGRATOR_IMAGE))
 
 # VERSION defaults to the project version; CI or the command line may override it.
 VERSION ?= $(shell python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])" 2>/dev/null || sed -n -E 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*["'\'']([^"'\'']+)["'\''].*/\1/p' pyproject.toml)
@@ -87,24 +89,27 @@ check-version:
 		exit 1; \
 	fi
 
-docker-tags: check-version ## Print every image tag for the current VERSION/CHANNEL
-	@for v in $(MAJOR).$(MINOR).$(PATCH) $(MAJOR).$(MINOR) $(MAJOR); do \
-		if [ -n "$(CHANNEL)" ]; then \
-			echo "$(IMAGE_REF):$$v-$(CHANNEL)"; \
-		else \
-			echo "$(IMAGE_REF):$$v"; \
-		fi; \
-	done
+VERSION_CHANNEL_TAGS = $(foreach tag,$(MAJOR).$(MINOR).$(PATCH) $(MAJOR).$(MINOR) $(MAJOR),$(tag)$(if $(CHANNEL),-$(CHANNEL)))
+IMAGE_VERSION_TAGS = $(addprefix $(IMAGE_REF):,$(VERSION_CHANNEL_TAGS))
+MIGRATOR_VERSION_TAGS = $(addprefix $(MIGRATOR_IMAGE_REF):,$(VERSION_CHANNEL_TAGS))
 
-docker-build: ## Build the image and apply every tag for the current channel
+docker-tags: check-version ## Print every image tag for the current VERSION/CHANNEL
+	@printf '%s\n' $(IMAGE_VERSION_TAGS) $(MIGRATOR_VERSION_TAGS)
+
+docker-build: check-version ## Build API and migrator images and apply every tag for the current channel
 	docker build -t $(IMAGE_REF):build .
-	@for tag in $$($(MAKE) --no-print-directory docker-tags); do \
+	@for tag in $(IMAGE_VERSION_TAGS); do \
 		echo "tagging $$tag"; \
 		docker tag $(IMAGE_REF):build $$tag; \
 	done
+	docker build -t $(MIGRATOR_IMAGE_REF):build -f migrator/Dockerfile migrator
+	@for tag in $(MIGRATOR_VERSION_TAGS); do \
+		echo "tagging $$tag"; \
+		docker tag $(MIGRATOR_IMAGE_REF):build $$tag; \
+	done
 
-docker-push: ## Push every tag for the current channel
-	@for tag in $$($(MAKE) --no-print-directory docker-tags); do \
+docker-push: check-version ## Push API and migrator tags for the current channel
+	@for tag in $(IMAGE_VERSION_TAGS) $(MIGRATOR_VERSION_TAGS); do \
 		echo "pushing $$tag"; \
 		docker push $$tag; \
 	done
