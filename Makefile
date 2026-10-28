@@ -36,8 +36,9 @@ CHANNEL ?= $(shell \
 BASE_BRANCH ?= develop
 HOTFIX_BASE_BRANCH ?= main
 
-install: ## Install project dependencies (alias: sync)
+install: ## Install API development and standalone migrator dependencies (alias: sync)
 	uv sync
+	uv sync --project migrator --frozen
 
 sync: install ## Alias for install
 
