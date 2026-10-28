@@ -1,0 +1,30 @@
+[project]
+name = "physiotrack-migrator"
+version = "0.1.0"
+description = "Standalone migrations for the dedicated Physiotrack PostgreSQL database"
+requires-python = ">=3.14"
+dependencies = [
+    "alembic>=1.18,<2",
+    "sqlalchemy>=2.0,<3",
+    "psycopg[binary]>=3.3,<4",
+]
+
+[project.scripts]
+physiotrack-migrator = "physiotrack_migrator.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = ["pytest>=9,<10", "ruff>=0.16.7", "pydantic>=2.12,<3"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: disposable PostgreSQL container required"]
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint.per-file-ignores]
+"src/physiotrack_migrator/cli.py" = ["BLE001"]
