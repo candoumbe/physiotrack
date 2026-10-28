@@ -74,7 +74,7 @@ Alternatively, run `source .venv/bin/activate` before using bare `alembic` comma
 For a different, uninitialized project, creating an Alembic environment requires
 a target directory: `uv run alembic init <directory>`. **Do not run `alembic init`
 in this repository:** the standalone migrator is already initialized. Use the
-`migrate-up`, `migrate-down` and
+`migrate-create`, `migrate-delete`, `migrate-up`, `migrate-down` and
 `migrate-status` targets below instead.
 
 Run the API:
@@ -120,13 +120,30 @@ make migrate-status
 make migrate-down
 make migrate-up REVISION=0001_measurements
 make migrate-down REVISION=base
+make migrate-create NAME="add patient's measurements"
+make migrate-delete
 ```
+
+`migrate-create` requires a nonblank `NAME`, used intact as the Alembic migration
+message, not the revision identifier. It generates an empty revision with
+`upgrade`/`downgrade` placeholders, without autogeneration (the API has no ORM
+metadata). Both `migrate-create` and `migrate-delete` require a source checkout
+and **do not require database configuration or connect to a database**.
+
+`migrate-delete` removes only the unique head file of a linear local migration
+chain, never the initial revision. It refuses empty or ambiguous graphs and
+files outside the source `versions` directory. **Delete is not rollback:** use
+it only for a local revision that has not been applied to any database. It cannot
+verify that condition without connecting. For an applied revision, roll back
+separately with `migrate-down REVISION=<previous-revision>` where operationally
+appropriate before considering deletion. Never delete shared/applied history
+as a substitute for a new corrective migration.
 
 `REVISION` is optional for `migrate-up` and `migrate-down`; when omitted, the
 CLI defaults remain `head` and `base`, respectively. From the MedEasy root,
 use `make -C physiotrack <target>`.
 
-Set `PHYSIOTRACK_MIGRATOR_DATABASE_URL` and
+For `up`, `down` and `status`, set `PHYSIOTRACK_MIGRATOR_DATABASE_URL` and
 `PHYSIOTRACK_MIGRATOR_DATABASE_NAME` first, as described in the migrator guide.
 `down` is destructive: it removes the owned measurements table and its data,
 never the database. The migrator has its own dependencies, lockfile, tests and

@@ -6,6 +6,8 @@ from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
+from alembic.script.revision import RevisionError
+from alembic.util import CommandError
 from sqlalchemy import Connection, create_engine, text
 from sqlalchemy.pool import NullPool
 
@@ -16,6 +18,80 @@ OWNER_MARKER = "physiotrack-migrator"
 
 class TargetError(RuntimeError):
     pass
+
+
+class LocalRevisionError(RuntimeError):
+    pass
+
+
+def migration_config() -> Config:
+    config = Config()
+    config.set_main_option("script_location", str(Path(__file__).parent / "migrations"))
+    return config
+
+
+def edit_revision(action: str, message: str | None = None) -> str:
+    if action not in {"create", "delete"}:
+        raise ValueError("Unsupported local revision action.")
+    if action == "create" and (message is None or not message.strip()):
+        raise LocalRevisionError("NAME / --message is required and must not be blank.")
+    package = Path(__file__).absolute().parent
+    if (
+        package.parent.name != "src"
+        or not (package.parents[1] / "pyproject.toml").is_file()
+    ):
+        raise LocalRevisionError(
+            "Revision editing requires a source checkout, not an installed wheel."
+        )
+    config = migration_config()
+    scripts = ScriptDirectory.from_config(config)
+    versions = package / "migrations" / "versions"
+    if (
+        Path(scripts.dir).resolve() != (package / "migrations").resolve()
+        or (package / "migrations").is_symlink()
+        or versions.is_symlink()
+        or any(path.is_symlink() for path in versions.glob("*.py"))
+    ):
+        raise LocalRevisionError(
+            "Revision files must stay inside the source versions directory."
+        )
+    try:
+        heads = scripts.get_heads()
+        revisions = list(scripts.walk_revisions())
+        if (
+            len(heads) != 1
+            or len(scripts.get_bases()) != 1
+            or any(
+                isinstance(item.down_revision, tuple) or item.dependencies
+                for item in revisions
+            )
+        ):
+            raise LocalRevisionError(
+                "Expected one unambiguous linear migration chain and a unique head."
+            )
+        head = scripts.get_revision(heads[0])
+        if action == "create":
+            created = command.revision(config, message=message, autogenerate=False)
+            return created.revision
+        if head.down_revision is None:
+            raise LocalRevisionError(
+                "No deletable revision: the initial migration is protected."
+            )
+        path = Path(head.path)
+        if (
+            path.is_symlink()
+            or path.resolve().parent != versions.resolve()
+            or path.suffix != ".py"
+        ):
+            raise LocalRevisionError(
+                "Refusing to delete a file outside the source versions directory."
+            )
+        path.unlink()
+        return head.revision
+    except (CommandError, RevisionError, KeyError) as error:
+        raise LocalRevisionError(
+            "Invalid or ambiguous Alembic revision graph."
+        ) from error
 
 
 def checked_target(
@@ -82,8 +158,7 @@ def checked_target(
 
 
 def migrate(settings: Settings, action: str, revision: str | None = None) -> str:
-    config = Config()
-    config.set_main_option("script_location", str(Path(__file__).parent / "migrations"))
+    config = migration_config()
     scripts = ScriptDirectory.from_config(config)
     known_revisions = {migration.revision for migration in scripts.walk_revisions()}
     if action not in {"up", "down", "status"}:

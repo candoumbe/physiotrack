@@ -5,7 +5,12 @@ import sys
 from collections.abc import Sequence
 
 from physiotrack_migrator.config import ConfigurationError, Settings
-from physiotrack_migrator.runner import TargetError, migrate
+from physiotrack_migrator.runner import (
+    LocalRevisionError,
+    TargetError,
+    edit_revision,
+    migrate,
+)
 
 
 class Parser(argparse.ArgumentParser):
@@ -33,10 +38,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands.add_parser(
         "status", help="Show the current revision without changing the schema."
     )
+    create = commands.add_parser(
+        "create", help="Create a local empty revision without a database."
+    )
+    create.add_argument(
+        "-m", "--message", required=True, help="Migration message, not revision ID."
+    )
+    commands.add_parser(
+        "delete",
+        help="Delete the local unapplied head file only; never roll back the database.",
+        description="Delete the local unapplied head file only; never roll back the database.",
+    )
     args = parser.parse_args(argv)
     try:
+        if args.command in {"create", "delete"}:
+            revision = edit_revision(args.command, getattr(args, "message", None))
+            print(
+                f"{'created' if args.command == 'create' else 'deleted'} revision: {revision}"
+            )
+            return 0
         settings = Settings.from_environ()
         revision = migrate(settings, args.command, getattr(args, "revision", None))
+    except LocalRevisionError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     except ConfigurationError as error:
         print(str(error), file=sys.stderr)
         return 2
@@ -48,7 +73,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     except Exception:
         print(
-            "Migration failed: verify database availability, permissions and revision.",
+            "Local revision editing failed: verify source files and permissions."
+            if args.command in {"create", "delete"}
+            else "Migration failed: verify database availability, permissions and revision.",
             file=sys.stderr,
         )
         return 1
