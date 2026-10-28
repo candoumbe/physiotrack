@@ -51,11 +51,31 @@ src/
 A `Makefile` wraps the common project tasks. Run `make help` to list all available
 targets.
 
-Install dependencies:
+Install API development tools and standalone migrator dependencies into their
+separate environments (`.venv` and `migrator/.venv`):
 
 ```bash
-make install
+make sync
 ```
+
+`make install` is an alias for the same installation. Alembic is included in the
+API's `dev` dependency group for local tooling, not in the API runtime image.
+The migrator keeps its own dependencies and lockfile.
+
+`uv sync` does not activate the environment or put its commands on your shell's
+`PATH`. From the Physiotrack root, run Alembic through uv:
+
+```bash
+uv run --frozen alembic --version
+uv run --frozen alembic init --help
+```
+
+Alternatively, run `source .venv/bin/activate` before using bare `alembic` commands.
+For a different, uninitialized project, creating an Alembic environment requires
+a target directory: `uv run alembic init <directory>`. **Do not run `alembic init`
+in this repository:** the standalone migrator is already initialized. Use the
+`migrate-up`, `migrate-down` and
+`migrate-status` targets below instead.
 
 Run the API:
 
@@ -69,9 +89,10 @@ Run tests:
 make test
 ```
 
-Each target is a thin wrapper around the underlying `uv` command (e.g. `make install`
-runs `uv sync`, `make run` runs `uv run uvicorn main:app --reload --app-dir src`, `make
-test` runs `uv run pytest`). You can still invoke `uv` directly if you need more control.
+Each target wraps the underlying `uv` commands (e.g. `make sync` runs `uv sync`
+and `uv sync --project migrator --frozen`, `make run` runs
+`uv run uvicorn main:app --reload --app-dir src`, `make test` runs `uv run pytest`).
+You can still invoke `uv` directly if you need more control.
 
 ## Changelog
 

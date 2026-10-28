@@ -19,6 +19,7 @@ testpaths = ["test"]
 
 [dependency-groups]
 dev = [
+    "alembic>=1.18,<2",
     "httpx",
     "pytest",
     "ruff>=0.16.7",
