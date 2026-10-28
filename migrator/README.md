@@ -79,6 +79,47 @@ and **all its rows**. It leaves the database and an empty, marked `alembic_versi
 table in place. A later `up` recreates an empty measurements table, not lost data.
 Back up data and obtain operational approval before a rollback.
 
+## Develop local revisions
+
+The existing Alembic environment is configured programmatically by the runner;
+do not run `alembic init` or create a second migration directory.
+From the Physiotrack root:
+
+```bash
+make migrate-create NAME="add patient's measurements"
+make migrate-delete
+```
+
+Equivalent standalone CLI commands:
+
+```bash
+uv run --project migrator --frozen physiotrack-migrator create --message "add patient's measurements"
+uv run --project migrator --frozen physiotrack-migrator delete
+```
+
+`create` (`-m`/`--message`) requires a nonblank message, preserved as supplied;
+`NAME` is not a revision identifier. Alembic generates the revision ID and links
+`down_revision` to the current head. Fill in the generated `upgrade` and
+`downgrade` placeholders manually: there is no autogeneration or ORM metadata.
+Quote shell arguments normally; for a literal dollar sign use single quotes or
+escape it in your shell. Make passes the message as data, not shell code.
+
+Both commands require a source checkout, refuse installed wheels/site-packages,
+and neither read database settings nor connect to a database. `delete` removes
+only the head file of a single linear revision chain, irrespective of file
+timestamps. The initial revision is protected. Empty histories, multiple heads,
+multiple bases, merged/dependent histories and files outside the source
+`versions` directory (including symbolic links) are refused. Local validation
+errors return exit code 2; filesystem/generation failures return 1.
+
+**Delete is not rollback.** Use it only for a local revision that has not been
+applied to any database; no database check is performed or implied. If already
+applied, rollback is a separate, potentially destructive operation:
+`make migrate-down REVISION=<previous-revision>`. Coordinate it for every
+affected database before removing a local file. Do not rewrite shared/applied
+history: prefer a new corrective migration. `up`, `down` and `status` still
+require both database variables and retain their existing behavior.
+
 ## Initial schema and limits
 
 Revision `0001_measurements` creates `public.measurements` with a supplied UUID

@@ -1,5 +1,9 @@
 .DEFAULT_GOAL := help
 
+ifneq ($(filter migrate-create,$(MAKECMDGOALS)),)
+override NAME := $(value NAME)
+endif
+
 # Image coordinates. REGISTRY is empty by default so local builds stay local.
 IMAGE ?= physiotrack-api
 REGISTRY ?=
@@ -31,7 +35,7 @@ CHANNEL ?= $(shell \
 	fi \
 )
 
-.PHONY: install sync run migrate-up migrate-down migrate-status test lint format clean help version check-version docker-tags docker-build docker-push docker-run feature chore coldfix release hotfix
+.PHONY: install sync run migrate-up migrate-down migrate-status migrate-create migrate-delete test lint format clean help version check-version docker-tags docker-build docker-push docker-run feature chore coldfix release hotfix
 
 BASE_BRANCH ?= develop
 HOTFIX_BASE_BRANCH ?= main
@@ -53,6 +57,13 @@ migrate-down: ## Destructive schema rollback (default: base; optional REVISION=.
 
 migrate-status: ## Show the current schema revision without changing it
 	uv run --project migrator --frozen physiotrack-migrator status
+
+migrate-create: private override export PHYSIOTRACK_MIGRATION_MESSAGE := $(value NAME)
+migrate-create: ## Create an empty local migration (required NAME='migration message'; no database)
+	uv run --project migrator --frozen physiotrack-migrator create --message="$$PHYSIOTRACK_MIGRATION_MESSAGE"
+
+migrate-delete: ## Delete the local unapplied head file only (not a database rollback)
+	uv run --project migrator --frozen physiotrack-migrator delete
 
 test: ## Run the test suite
 	uv run pytest
