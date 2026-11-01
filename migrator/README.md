@@ -1,7 +1,7 @@
 # Physiotrack schema migrator
 
 An independent Python >=3.14 executable for schema migrations only. It uses
-Alembic, SQLAlchemy Core and Psycopg 3. It does not import, install or start
+Alembic, SQLAlchemy ORM and Psycopg 3. It does not import, install or start
 FastAPI or `src/main.py`. The API still stores measurements **in memory**;
 running this project does not enable API persistence or transfer any data.
 
@@ -74,10 +74,12 @@ example `up --revision 0001_measurements`. `status` prints `revision: base` or
 the installed revision. Repeating `up` at head or `down` at base is a no-op.
 Migrations and their Alembic revision changes are transactional.
 
-**Rollback is destructive:** `down` to base drops the owned `measurements` table
-and **all its rows**. It leaves the database and an empty, marked `alembic_version`
-table in place. A later `up` recreates an empty measurements table, not lost data.
+**Rollback to base is destructive:** `down` to base drops all owned measurement
+tables and **all their rows**. It leaves the database and an empty, marked
+`alembic_version` table in place. A later `up` recreates empty tables, not lost data.
 Back up data and obtain operational approval before a rollback.
+`down --revision 0001_measurements` instead merges the four tables back into the
+initial table without deleting measurements, subject to the UUID limitation below.
 
 ## Develop local revisions
 
@@ -100,7 +102,9 @@ uv run --project migrator --frozen physiotrack-migrator delete
 `create` (`-m`/`--message`) requires a nonblank message, preserved as supplied;
 `NAME` is not a revision identifier. Alembic generates the revision ID and links
 `down_revision` to the current head. Fill in the generated `upgrade` and
-`downgrade` placeholders manually: there is no autogeneration or ORM metadata.
+`downgrade` placeholders manually: the CLI does not enable autogeneration.
+Alembic's environment loads `Base.metadata` from `physiotrack_migrator.models`;
+keep that metadata and new revisions in sync.
 Quote shell arguments normally; for a literal dollar sign use single quotes or
 escape it in your shell. Make passes the message as data, not shell code.
 
@@ -120,7 +124,7 @@ affected database before removing a local file. Do not rewrite shared/applied
 history: prefer a new corrective migration. `up`, `down` and `status` still
 require both database variables and retain their existing behavior.
 
-## Initial schema and limits
+## Schema and limits
 
 Revision `0001_measurements` creates `public.measurements` with a supplied UUID
 primary key, nullable nonempty `subject_id`, `type`, `date_of_measure` and the
@@ -134,7 +138,29 @@ variant-specific columns. Checks allow exactly one of:
 | `blood_pressure` | `systolic`, `diastolic`, `unit = 'mmHg'` | none |
 
 All columns belonging to other variants must be null. Missing optional columns
-remain null. There is no subject table, foreign key, generated UUID, speculative
+remain null in this historical schema.
+
+Revision `0002_dedicated_measurements` (the current head) replaces that table with
+four independent tables in `public`: `heart_rate_measurements`,
+`sleep_measurements`, `activity_measurements` and `blood_pressure_measurements`.
+Each owns `id`, `subject_id`, `date_of_measure` and only its variant-specific
+columns from the table above. Required fields are `NOT NULL`; optional fields
+remain nullable. The `type` discriminator is no longer stored.
+
+The new revision locks source tables against concurrent writes, copies values
+without reserializing dates or converting numbers, and compares every old field
+in both directions with `EXCEPT ALL` before dropping source tables. DDL and data
+copy share a transaction; mismatches, unexpected columns or name collisions abort
+without losing rows. Unknown objects and ownership mismatches remain rejected.
+Rollback to `0001_measurements` uses its original DDL and verifies the merged
+data before dropping the dedicated tables. IDs must be globally unique for that
+rollback: independent tables can contain overlapping UUIDs, but the initial
+table cannot. The CLI refuses such a downgrade with an actionable message;
+resolve overlapping IDs explicitly before retrying. No IDs are silently changed.
+The existing statement/lock timeouts still apply; large datasets may require
+an operationally planned migration window. Historical revision `0001` is unchanged.
+
+There is no subject table, foreign key, server-generated UUID, speculative
 index or invented medical bound. Integers use unconstrained `NUMERIC` plus finite,
 integral checks rather than silently limiting Python integers to `BIGINT`.
 PostgreSQL still has a technical limit of 131072 digits before the decimal point;
@@ -148,6 +174,23 @@ inventing UTC normalization. **SQL does not enforce datetime syntax**: contract
 tests validate Pydantic serialization/round trips, but direct SQL writers could
 store invalid date text. Timezone semantics, date indexing/querying and stronger
 SQL validation belong to a future persistence design, not this migrator.
+
+## Measurement models
+
+`physiotrack_migrator.models` exposes `Base`, the abstract Python `Measurement`,
+and `HeartRateMeasurement`, `SleepMeasurement`, `ActivityMeasurement` and
+`BloodPressureMeasurement`. Each concrete class maps its own dedicated table.
+`Measurement` only shares Python field and constraint declarations; it has no
+table or mapper and cannot be selected. Query the concrete class, for example
+`select(HeartRateMeasurement)`. Reconstruct the API discriminator from the chosen
+variant when serializing to the unchanged Pydantic contract.
+
+All variants share `id`, `subject_id` and `date_of_measure` (the ORM name for the
+API's `dateOfMeasure`). ORM writes default `id` to a new UUID4 and blood pressure
+`unit` to `mmHg`; these are client-side defaults, not new database defaults.
+Integer fields load as Python `int`, and dates bind/load as `datetime` using the
+existing lossless `NUMERIC` and ISO-8601 `TEXT` storage. These models match revision
+`0002_dedicated_measurements`; they do not connect the API to the database.
 
 ## Separate container
 
