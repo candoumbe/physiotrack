@@ -1,7 +1,12 @@
 {
     "python-envs.pythonProjects": [
         {
-            "path": "src",
+            "path": ".",
+            "envManager": "ms-python.python:venv",
+            "packageManager": "ms-python.python:pip"
+        },
+        {
+            "path": "migrator",
             "envManager": "ms-python.python:venv",
             "packageManager": "ms-python.python:pip"
         }
