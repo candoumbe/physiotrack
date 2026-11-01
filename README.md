@@ -13,7 +13,7 @@ identifier.
 ### Designed, not yet implemented
 
 The following describes the target architecture for physiological measurement
-recording. Only the Pydantic schemas exist today (`src/features/measurements/schemas.py`);
+recording. Only the Pydantic schemas exist today (`src/features/measurements/schemas/`);
 no router or endpoints have been implemented yet.
 
 - Subject-scoped measurements, with the subject identifier (`subject_id`) carried in the
@@ -43,7 +43,7 @@ src/
     health/                   # GET /health
       router.py
     measurements/              # Physiological measurement schemas (in progress)
-      schemas.py
+      schemas/                 # One class per module; public reexports in __init__.py
 ```
 
 ## Getting started
@@ -145,6 +145,9 @@ use `make -C physiotrack <target>`.
 
 For `up`, `down` and `status`, set `PHYSIOTRACK_MIGRATOR_DATABASE_URL` and
 `PHYSIOTRACK_MIGRATOR_DATABASE_NAME` first, as described in the migrator guide.
-`down` is destructive: it removes the owned measurements table and its data,
-never the database. The migrator has its own dependencies, lockfile, tests and
+`down` to base is destructive: it removes the four dedicated measurement tables
+and their data, never the database. Revision `0002_dedicated_measurements` safely
+splits existing measurements by type; rollback to `0001_measurements` merges
+them without loss when IDs remain globally unique. See the migrator guide for
+the safety checks and limitations. The migrator has its own dependencies, lockfile, tests and
 non-server Docker image.
