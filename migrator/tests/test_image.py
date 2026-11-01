@@ -49,8 +49,8 @@ def test_noneditable_runtime_image(migrator_image, database, engine):
     )
     assert result.returncode == 0, result.stderr
     for action, expected in [
-        ("up", "0001_measurements"),
-        ("status", "0001_measurements"),
+        ("up", "0002_dedicated_measurements"),
+        ("status", "0002_dedicated_measurements"),
         ("down", "base"),
     ]:
         result = run_image(migrator_image, database, action)

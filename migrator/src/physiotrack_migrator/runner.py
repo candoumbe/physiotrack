@@ -14,6 +14,12 @@ from sqlalchemy.pool import NullPool
 from physiotrack_migrator.config import Settings
 
 OWNER_MARKER = "physiotrack-migrator"
+MEASUREMENT_TABLES = {
+    "heart_rate_measurements",
+    "sleep_measurements",
+    "activity_measurements",
+    "blood_pressure_measurements",
+}
 
 
 class TargetError(RuntimeError):
@@ -135,7 +141,7 @@ def checked_target(
         namespaces
         or foreign_objects
         or any(
-            name not in {"measurements", "alembic_version"}
+            name not in {"measurements", "alembic_version", *MEASUREMENT_TABLES}
             or kind != "r"
             or owner != user
             or marker != OWNER_MARKER
@@ -144,7 +150,7 @@ def checked_target(
     ):
         raise TargetError()
     tables = {row[0] for row in relations}
-    if "measurements" in tables and "alembic_version" not in tables:
+    if tables - {"alembic_version"} and "alembic_version" not in tables:
         raise TargetError()
     revisions = MigrationContext.configure(
         connection, opts={"version_table_schema": "public"}
@@ -152,7 +158,14 @@ def checked_target(
     if (
         len(revisions) > 1
         or any(revision not in known_revisions for revision in revisions)
-        or (bool(revisions) != ("measurements" in tables))
+        or tables - {"alembic_version"}
+        != (
+            set()
+            if not revisions
+            else {"measurements"}
+            if revisions == ("0001_measurements",)
+            else MEASUREMENT_TABLES
+        )
     ):
         raise TargetError()
 

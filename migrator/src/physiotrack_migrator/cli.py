@@ -5,6 +5,7 @@ import sys
 from collections.abc import Sequence
 
 from physiotrack_migrator.config import ConfigurationError, Settings
+from physiotrack_migrator.migration_safety_error import MigrationSafetyError
 from physiotrack_migrator.runner import (
     LocalRevisionError,
     TargetError,
@@ -70,6 +71,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             "Database target rejected: verify dedication, role and migration ownership.",
             file=sys.stderr,
         )
+        return 1
+    except MigrationSafetyError as error:
+        print(str(error), file=sys.stderr)
         return 1
     except Exception:
         print(
