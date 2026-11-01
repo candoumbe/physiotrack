@@ -45,8 +45,8 @@ def test_create_delete_round_trip_without_database(source_checkout, capsys):
     assert cli.main(["create", "--message", message]) == 0
     scripts = ScriptDirectory(str(source_checkout))
     head = scripts.get_revision(scripts.get_current_head())
-    assert head.revision != "0001_measurements"
-    assert head.down_revision == "0001_measurements"
+    assert head.revision != "0002_dedicated_measurements"
+    assert head.down_revision == "0002_dedicated_measurements"
     assert head.doc == message
     assert head.module.upgrade() is None
     assert head.module.downgrade() is None
@@ -68,7 +68,7 @@ def test_create_requires_message(source_checkout):
     with pytest.raises(SystemExit) as raised:
         cli.main(["create"])
     assert raised.value.code == 2
-    assert len(list((source_checkout / "versions").glob("*.py"))) == 1
+    assert len(list((source_checkout / "versions").glob("*.py"))) == 2
 
 
 @pytest.mark.parametrize("action", ["create", "delete"])
@@ -83,6 +83,7 @@ def test_revision_editing_requires_source_checkout(
 
 
 def test_delete_protects_initial_revision(source_checkout, capsys):
+    assert cli.main(["delete"]) == 0
     initial = source_checkout / "versions/0001_measurements.py"
     before = initial.read_bytes()
     assert cli.main(["delete"]) == 2
@@ -113,7 +114,8 @@ def test_revision_editing_rejects_ambiguous_graph(
 ):
     config = runner.migration_config()
     if graph == "empty":
-        (source_checkout / "versions/0001_measurements.py").unlink()
+        for path in (source_checkout / "versions").glob("*.py"):
+            path.unlink()
     elif graph == "broken":
         initial = source_checkout / "versions/0001_measurements.py"
         initial.write_text(
@@ -208,7 +210,7 @@ def test_make_create_delete_preserves_message(source_checkout, message, monkeypa
     scripts = ScriptDirectory(str(source_checkout))
     head = scripts.get_revision(scripts.get_current_head())
     assert head.module.__doc__ == message
-    assert head.down_revision == "0001_measurements"
+    assert head.down_revision == "0002_dedicated_measurements"
     assert not (working / "shell-marker").exists()
     assert not (working / "make-marker").exists()
     result = subprocess.run(
@@ -255,7 +257,7 @@ def test_make_create_requires_name(source_checkout, name_argument, monkeypatch):
     )
     assert result.returncode != 0
     assert "required" in result.stderr
-    assert len(list((source_checkout / "versions").glob("*.py"))) == 1
+    assert len(list((source_checkout / "versions").glob("*.py"))) == 2
 
 
 def test_wheel_contains_working_template_and_refuses_source_editing(
@@ -298,7 +300,7 @@ config = runner.migration_config()
 command.revision(config, message='packaged template')
 scripts = ScriptDirectory.from_config(config)
 head = scripts.get_revision(scripts.get_current_head())
-assert head.down_revision == '0001_measurements'
+assert head.down_revision == '0002_dedicated_measurements'
 assert head.module.__doc__ == 'packaged template'
 assert head.module.upgrade() is None
 assert head.module.downgrade() is None

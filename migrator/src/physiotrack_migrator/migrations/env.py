@@ -2,9 +2,14 @@
 
 from alembic import context
 
+from physiotrack_migrator.models import Base
+
 connection = context.config.attributes["connection"]
 context.configure(
-    connection=connection, version_table_schema="public", transactional_ddl=True
+    connection=connection,
+    target_metadata=Base.metadata,
+    version_table_schema="public",
+    transactional_ddl=True,
 )
 with context.begin_transaction():
     context.run_migrations()

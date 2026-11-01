@@ -1,13 +1,64 @@
 import sys
+from importlib import import_module
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import TypeAdapter
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from features.measurements import schemas
 from main import app
 
 client = TestClient(app)
+
+
+@pytest.mark.parametrize(
+    "name,module_name",
+    [
+        ("MeasurementType", "measurement_type"),
+        ("MeasurementValue", "measurement_value"),
+        ("MeasurementBase", "measurement_base"),
+        ("HeartRateMeasurement", "heart_rate_measurement"),
+        ("SleepMeasurement", "sleep_measurement"),
+        ("ActivityMeasurement", "activity_measurement"),
+        ("BloodPressureMeasurement", "blood_pressure_measurement"),
+    ],
+)
+def test_schema_package_reexports(name, module_name):
+    module = import_module(f"features.measurements.schemas.{module_name}")
+    assert getattr(schemas, name) is getattr(module, name)
+
+
+@pytest.mark.parametrize(
+    "model_class,variant",
+    [
+        (schemas.HeartRateMeasurement, {"type": "heart_rate", "bpm": 72}),
+        (schemas.SleepMeasurement, {"type": "sleep", "duration_minutes": 420}),
+        (schemas.ActivityMeasurement, {"type": "activity", "steps": 1000}),
+        (
+            schemas.BloodPressureMeasurement,
+            {"type": "blood_pressure", "systolic": 120, "diastolic": 80},
+        ),
+    ],
+)
+def test_schema_union_round_trip(model_class, variant):
+    contract = TypeAdapter(schemas.Measurement)
+    model = contract.validate_python(
+        {**variant, "dateOfMeasure": "2026-10-30T15:25:42Z"}
+    )
+    assert type(model) is model_class
+    assert contract.validate_json(contract.dump_json(model)) == model
+    assert contract.json_schema()["discriminator"] == {
+        "propertyName": "type",
+        "mapping": {
+            "heart_rate": "#/$defs/HeartRateMeasurement",
+            "sleep": "#/$defs/SleepMeasurement",
+            "activity": "#/$defs/ActivityMeasurement",
+            "blood_pressure": "#/$defs/BloodPressureMeasurement",
+        },
+    }
 
 
 def test_create_and_list_measurements_for_subject():
@@ -26,7 +77,9 @@ def test_create_and_list_measurements_for_subject():
     assert body["subject_id"] == subject_id
     assert body["bpm"] == 72
     assert "id" in body
-    assert body["dateOfMeasure"].endswith("Z") or body["dateOfMeasure"].endswith("+00:00")
+    assert body["dateOfMeasure"].endswith("Z") or body["dateOfMeasure"].endswith(
+        "+00:00"
+    )
 
     list_response = client.get(f"/subjects/{subject_id}/measurements")
     assert list_response.status_code == 200, list_response.text

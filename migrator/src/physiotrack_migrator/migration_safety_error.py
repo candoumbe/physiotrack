@@ -1,0 +1,2 @@
+class MigrationSafetyError(RuntimeError):
+    pass

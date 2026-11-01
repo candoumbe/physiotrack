@@ -1,24 +1,42 @@
-import importlib.util
+import importlib
 import math
 import socket
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
+from alembic.autogenerate import compare_metadata
+from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from pydantic import TypeAdapter
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from physiotrack_migrator import cli
 from physiotrack_migrator.config import Settings
+from physiotrack_migrator.models import (
+    ActivityMeasurement,
+    Base,
+    BloodPressureMeasurement,
+    HeartRateMeasurement,
+    SleepMeasurement,
+)
 from physiotrack_migrator.runner import TargetError, migrate
 
 pytestmark = pytest.mark.integration
-HEAD = "0001_measurements"
+HEAD = "0002_dedicated_measurements"
+INITIAL = "0001_measurements"
+TABLES = {
+    "heart_rate_measurements",
+    "sleep_measurements",
+    "activity_measurements",
+    "blood_pressure_measurements",
+}
 PROJECT = Path(__file__).resolve().parents[1]
 
 
@@ -88,11 +106,9 @@ def test_up_up_down_down_up_introspected(database, engine, tmp_path):
             assert set(current) == {"alembic_version"}
             assert revisions == []
         else:
-            assert set(current) == {"measurements", "alembic_version"}
+            assert set(current) == TABLES | {"alembic_version"}
             assert revisions == [HEAD]
-            assert len(current["measurements"][0]) == 12
-            assert len(current["measurements"][1]) == 8
-            assert current["measurements"][2] == ["id"]
+            assert all(current[name][2] == ["id"] for name in TABLES)
             if initial is None:
                 initial = current
             assert current == initial
@@ -100,18 +116,122 @@ def test_up_up_down_down_up_introspected(database, engine, tmp_path):
 
 @pytest.fixture
 def measurements(database, engine):
-    migrate(settings(database), "up", "head")
+    migrate(settings(database), "up", INITIAL)
     return sa.Table(
         "measurements", sa.MetaData(), schema="public", autoload_with=engine
     )
 
 
+@pytest.fixture
+def dedicated(database):
+    migrate(settings(database), "up", "head")
+
+
 def adapter():
-    path = PROJECT.parent / "src/features/measurements/schemas.py"
-    spec = importlib.util.spec_from_file_location("measurement_contract", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.syspath_prepend(str(PROJECT.parent / "src"))
+        module = importlib.import_module("features.measurements.schemas")
     return TypeAdapter(module.Measurement)
+
+
+def test_orm_metadata_matches_migration(database, engine):
+    migrate(settings(database), "up", "head")
+    with engine.connect() as connection:
+        context = MigrationContext.configure(connection)
+        assert compare_metadata(context, Base.metadata) == []
+    expected = {
+        name: details for name, details in schema(engine).items() if name in TABLES
+    }
+    migrate(settings(database), "down", "base")
+    Base.metadata.create_all(engine)
+    assert {
+        name: details for name, details in schema(engine).items() if name in TABLES
+    } == expected
+    Base.metadata.drop_all(engine)
+
+
+@pytest.mark.parametrize(
+    "model_class,variant",
+    [
+        (HeartRateMeasurement, {"type": "heart_rate", "bpm": 72}),
+        (HeartRateMeasurement, {"type": "heart_rate", "bpm": -(10**80)}),
+        (SleepMeasurement, {"type": "sleep", "duration_minutes": 420}),
+        (
+            SleepMeasurement,
+            {"type": "sleep", "duration_minutes": -1, "quality_score": 8.25},
+        ),
+        (ActivityMeasurement, {"type": "activity", "steps": 10**80}),
+        (ActivityMeasurement, {"type": "activity", "steps": 0, "calories": -1.5}),
+        (
+            BloodPressureMeasurement,
+            {"type": "blood_pressure", "systolic": 120, "diastolic": 80},
+        ),
+        (
+            BloodPressureMeasurement,
+            {"type": "blood_pressure", "systolic": -(10**80), "diastolic": 10**80},
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "date",
+    [
+        "2026-10-28T11:58:53.123456",
+        "2026-10-28T11:58:53.123456+05:30",
+        "2026-10-28T11:58:53Z",
+    ],
+)
+@pytest.mark.parametrize("subject", [None, "synthetic-subject"])
+def test_orm_variants_round_trip(
+    model_class, variant, date, subject, dedicated, engine
+):
+    contract = adapter()
+    expected = contract.validate_python(
+        {**variant, "dateOfMeasure": date, "subject_id": subject}
+    )
+    values = expected.model_dump(exclude={"type"})
+    values["date_of_measure"] = values.pop("dateOfMeasure")
+    with Session(engine) as session:
+        session.add(model_class(**values))
+        session.commit()
+    with Session(engine) as session:
+        stored = session.scalars(sa.select(model_class)).one()
+        assert type(stored) is model_class
+        assert stored.date_of_measure.isoformat() == expected.dateOfMeasure.isoformat()
+        values = {
+            attribute.key: getattr(stored, attribute.key)
+            for attribute in sa.inspect(model_class).column_attrs
+        }
+        values["dateOfMeasure"] = values.pop("date_of_measure")
+        values["type"] = variant["type"]
+        assert contract.validate_python(values) == expected
+        for field in ("bpm", "duration_minutes", "steps", "systolic", "diastolic"):
+            if field in values:
+                assert type(values[field]) is int
+
+
+def test_orm_defaults_and_update(dedicated, engine):
+    date = datetime(2026, 10, 30, 15, 16, 36)
+    models = [
+        HeartRateMeasurement(date_of_measure=date, bpm=72),
+        SleepMeasurement(date_of_measure=date, duration_minutes=420),
+        ActivityMeasurement(date_of_measure=date, steps=1000),
+        BloodPressureMeasurement(date_of_measure=date, systolic=120, diastolic=80),
+    ]
+    with Session(engine) as session:
+        session.add_all(models)
+        session.commit()
+        assert len({model.id for model in models}) == 4
+        assert all(
+            model.id.version == 4 and model.subject_id is None for model in models
+        )
+        assert models[1].quality_score is None
+        assert models[2].calories is None
+        assert models[3].unit == "mmHg"
+        models[0].bpm = 75
+        session.commit()
+    with Session(engine) as session:
+        assert session.scalars(sa.select(HeartRateMeasurement)).one().bpm == 75
+    assert all("unit" not in model.__table__.c for model in models[:3])
 
 
 @pytest.mark.parametrize(
@@ -236,7 +356,7 @@ def test_primary_key_and_destructive_rollback(database, measurements, engine):
     with pytest.raises(IntegrityError), engine.begin() as connection:
         connection.execute(measurements.insert().values(**row))
     migrate(settings(database), "down", "base")
-    migrate(settings(database), "up", "head")
+    migrate(settings(database), "up", INITIAL)
     with engine.connect() as connection:
         assert (
             connection.scalar(sa.select(sa.func.count()).select_from(measurements)) == 0
@@ -407,6 +527,171 @@ def test_unavailable_database_is_bounded_and_redacted(database):
 def test_explicit_revision_targets(database, engine):
     assert run_cli(database, "up", "--revision", HEAD).returncode == 0
     assert run_cli(database, "down", "--revision", HEAD).returncode == 0
-    assert "measurements" in schema(engine)
+    assert TABLES <= schema(engine).keys()
     assert run_cli(database, "down", "--revision", "base").returncode == 0
-    assert "measurements" not in schema(engine)
+    assert not TABLES & schema(engine).keys()
+
+
+@pytest.mark.parametrize(
+    "optional", [None, 8.25, float("inf"), float("-inf"), float("nan")]
+)
+def test_populated_split_and_merge_preserve_every_field(
+    database, measurements, engine, optional
+):
+    rows = [
+        {"type": "heart_rate", "bpm": -(10**80)},
+        {"type": "sleep", "duration_minutes": 10**80, "quality_score": optional},
+        {"type": "activity", "steps": -(10**80), "calories": optional},
+        {"type": "blood_pressure", "systolic": 10**80, "diastolic": -1, "unit": "mmHg"},
+    ]
+    with engine.begin() as connection:
+        for index, row in enumerate(rows):
+            connection.execute(
+                measurements.insert().values(
+                    id=uuid4(),
+                    subject_id=None if index % 2 else "synthetic-subject",
+                    date_of_measure="2026-10-30T15:47:07.123456"
+                    + ("+05:30" if index % 2 else ""),
+                    **row,
+                )
+            )
+        original = connection.execute(
+            sa.select(measurements).order_by(measurements.c.id)
+        ).all()
+    for _ in range(2):
+        migrate(settings(database), "up", HEAD)
+        assert set(schema(engine)) == TABLES | {"alembic_version"}
+        with engine.connect() as connection:
+            for name in TABLES:
+                table = sa.Table(
+                    name, sa.MetaData(), schema="public", autoload_with=connection
+                )
+                assert (
+                    connection.scalar(sa.select(sa.func.count()).select_from(table))
+                    == 1
+                )
+        migrate(settings(database), "down", INITIAL)
+        with engine.connect() as connection:
+            restored = connection.execute(
+                sa.select(measurements).order_by(measurements.c.id)
+            ).all()
+
+        def normalize(records):
+            return [
+                tuple(
+                    "NaN" if isinstance(value, float) and math.isnan(value) else value
+                    for value in row
+                )
+                for row in records
+            ]
+
+        assert normalize(restored) == normalize(original)
+
+
+def test_downgrade_duplicate_ids_is_actionable_and_atomic(database, dedicated, engine):
+    identifier = uuid4()
+    date = datetime(2026, 10, 30)
+    with Session(engine) as session:
+        session.add_all(
+            [
+                HeartRateMeasurement(id=identifier, date_of_measure=date, bpm=72),
+                SleepMeasurement(
+                    id=identifier, date_of_measure=date, duration_minutes=420
+                ),
+            ]
+        )
+        session.commit()
+    result = run_cli(database, "down", "--revision", INITIAL)
+    assert result.returncode == 1
+    assert "UUIDs overlap" in result.stderr
+    assert "Assign globally unique IDs" in result.stderr
+    assert set(schema(engine)) == TABLES | {"alembic_version"}
+    assert run_cli(database, "status").stdout.strip() == f"revision: {HEAD}"
+
+
+def test_split_refuses_unexpected_columns_without_data_loss(
+    database, measurements, engine
+):
+    with engine.begin() as connection:
+        connection.execute(
+            sa.text("ALTER TABLE public.measurements ADD COLUMN unexpected text")
+        )
+    before = schema(engine)
+    result = run_cli(database, "up")
+    assert result.returncode == 1
+    assert "unexpected measurement columns" in result.stderr
+    assert schema(engine) == before
+    assert run_cli(database, "status").stdout.strip() == f"revision: {INITIAL}"
+
+
+@pytest.mark.parametrize("name", sorted(TABLES))
+def test_split_refuses_table_name_collision(database, measurements, engine, name):
+    with engine.begin() as connection:
+        connection.execute(sa.text(f'CREATE TABLE public."{name}" (id integer)'))
+        connection.execute(
+            sa.text(f"COMMENT ON TABLE public.\"{name}\" IS 'physiotrack-migrator'")
+        )
+    before = schema(engine)
+    result = run_cli(database, "up")
+    assert result.returncode == 1
+    assert "target rejected" in result.stderr
+    assert schema(engine) == before
+
+
+@pytest.mark.parametrize(
+    "model,values,integer_fields",
+    [
+        (HeartRateMeasurement, {"bpm": 72}, ("bpm",)),
+        (SleepMeasurement, {"duration_minutes": 420}, ("duration_minutes",)),
+        (ActivityMeasurement, {"steps": 1000}, ("steps",)),
+        (
+            BloodPressureMeasurement,
+            {"systolic": 120, "diastolic": 80, "unit": "mmHg"},
+            ("systolic", "diastolic"),
+        ),
+    ],
+)
+def test_dedicated_constraints(
+    database, dedicated, engine, model, values, integer_fields
+):
+    row = {"id": uuid4(), "date_of_measure": datetime(2026, 10, 30), **values}
+    invalid = [{"subject_id": ""}, {"id": None}, {"date_of_measure": None}]
+    invalid.extend(
+        {field: value}
+        for field in integer_fields
+        for value in (None, "1.5", "NaN", "Infinity", "-Infinity")
+    )
+    if model is BloodPressureMeasurement:
+        invalid.extend([{"unit": "other"}, {"unit": None}])
+    for changes in invalid:
+        with pytest.raises(IntegrityError), engine.begin() as connection:
+            connection.execute(model.__table__.insert().values(**{**row, **changes}))
+    with engine.begin() as connection:
+        connection.execute(model.__table__.insert().values(**row))
+    with pytest.raises(IntegrityError), engine.begin() as connection:
+        connection.execute(model.__table__.insert().values(**row))
+
+
+def test_split_detects_unrepresentable_legacy_rows(database, measurements, engine):
+    with engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                "ALTER TABLE public.measurements DROP CONSTRAINT ck_measurement_variant"
+            )
+        )
+        connection.execute(
+            measurements.insert().values(
+                id=uuid4(),
+                type="heart_rate",
+                bpm=72,
+                steps=1,
+                date_of_measure="2026-10-30T15:47:07",
+            )
+        )
+    before = schema(engine)
+    result = run_cli(database, "up")
+    assert result.returncode == 1
+    assert "copy differs" in result.stderr
+    assert schema(engine) == before
+    with engine.connect() as connection:
+        assert connection.scalar(sa.select(measurements.c.steps)) == 1
