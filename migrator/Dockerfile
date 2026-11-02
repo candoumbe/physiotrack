@@ -23,4 +23,4 @@ COPY --from=builder --chown=migrator:migrator /app/.venv /app/.venv
 USER migrator
 
 ENTRYPOINT ["physiotrack-migrator"]
-CMD ["--help"]
+CMD ["up"]
