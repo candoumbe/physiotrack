@@ -37,13 +37,17 @@ CHANNEL ?= $(shell \
 	fi \
 )
 
-.PHONY: install sync run migrate-up migrate-down migrate-status migrate-create migrate-delete test lint format clean help version check-version docker-tags docker-build docker-push docker-run feature chore coldfix release hotfix
+.PHONY: install api-install migrator-install sync run migrate-up migrate-down migrate-status migrate-create migrate-delete test api-test migrator-test lint api-lint migrator-lint format clean help version check-version docker-tags docker-build docker-push docker-run feature chore coldfix release hotfix
 
 BASE_BRANCH ?= develop
 HOTFIX_BASE_BRANCH ?= main
 
-install: ## Install API development and standalone migrator dependencies (alias: sync)
+install: api-install migrator-install ## Install API development and standalone migrator dependencies (alias: sync)
+
+api-install: ## Install API dependencies in the root environment
 	uv sync
+
+migrator-install: ## Install standalone migrator dependencies
 	uv sync --project migrator --frozen
 
 sync: install ## Alias for install
@@ -67,11 +71,22 @@ migrate-create: ## Create an empty local migration (required NAME='migration mes
 migrate-delete: ## Delete the local unapplied head file only (not a database rollback)
 	uv run --project migrator --frozen physiotrack-migrator delete
 
-test: ## Run the test suite
-	uv run pytest
+test: api-test migrator-test ## Run API and migrator tests
 
-lint: ## Check code style with ruff
-	uv run ruff check .
+api-test: ## Run API tests
+	uv run pytest -c pyproject.toml test
+
+migrator-test: ## Run standalone migrator tests
+	uv run --project migrator --frozen pytest -c migrator/pyproject.toml migrator/tests
+
+lint: api-lint migrator-lint ## Check API and migrator code style
+
+api-lint: ## Lint API sources and tests with Ruff
+	uv run ruff check src test
+
+migrator-lint: ## Lint and check formatting for the standalone migrator
+	uv run --project migrator --frozen ruff check migrator
+	uv run --project migrator --frozen ruff format --check migrator
 
 format: ## Format code with ruff
 	uv run ruff format .
