@@ -4,7 +4,7 @@ import socket
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -210,7 +210,7 @@ def test_orm_variants_round_trip(
 
 
 def test_orm_defaults_and_update(dedicated, engine):
-    date = datetime(2026, 10, 30, 15, 16, 36)
+    date = datetime(2026, 10, 30, 15, 16, 36, tzinfo=UTC)
     models = [
         HeartRateMeasurement(date_of_measure=date, bpm=72),
         SleepMeasurement(date_of_measure=date, duration_minutes=420),
@@ -590,7 +590,7 @@ def test_populated_split_and_merge_preserve_every_field(
 
 def test_downgrade_duplicate_ids_is_actionable_and_atomic(database, dedicated, engine):
     identifier = uuid4()
-    date = datetime(2026, 10, 30)
+    date = datetime(2026, 10, 30, tzinfo=UTC)
     with Session(engine) as session:
         session.add_all(
             [
@@ -654,7 +654,7 @@ def test_split_refuses_table_name_collision(database, measurements, engine, name
 def test_dedicated_constraints(
     database, dedicated, engine, model, values, integer_fields
 ):
-    row = {"id": uuid4(), "date_of_measure": datetime(2026, 10, 30), **values}
+    row = {"id": uuid4(), "date_of_measure": datetime(2026, 10, 30, tzinfo=UTC), **values}
     invalid = [{"subject_id": ""}, {"id": None}, {"date_of_measure": None}]
     invalid.extend(
         {field: value}
@@ -685,7 +685,7 @@ def test_split_detects_unrepresentable_legacy_rows(database, measurements, engin
                 type="heart_rate",
                 bpm=72,
                 steps=1,
-                date_of_measure="2026-10-30T15:47:07",
+                date_of_measure="2026-10-30T15:47:07+00:00",
             )
         )
     before = schema(engine)
