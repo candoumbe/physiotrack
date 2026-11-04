@@ -654,7 +654,11 @@ def test_split_refuses_table_name_collision(database, measurements, engine, name
 def test_dedicated_constraints(
     database, dedicated, engine, model, values, integer_fields
 ):
-    row = {"id": uuid4(), "date_of_measure": datetime(2026, 10, 30, tzinfo=UTC), **values}
+    row = {
+        "id": uuid4(),
+        "date_of_measure": datetime(2026, 10, 30, tzinfo=UTC),
+        **values,
+    }
     invalid = [{"subject_id": ""}, {"id": None}, {"date_of_measure": None}]
     invalid.extend(
         {field: value}
