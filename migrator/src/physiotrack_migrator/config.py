@@ -28,6 +28,10 @@ class Settings:
             )
         try:
             url = make_url(raw_url)
+            if url.drivername == "postgresql":
+                url = url.set(drivername="postgresql+psycopg")
+            if not url.database:
+                url = url.set(database=name)
             valid = (
                 url.drivername == "postgresql+psycopg"
                 and bool(url.host)

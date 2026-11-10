@@ -22,15 +22,19 @@ Supply both environment variables through your shell or secret manager:
 
 | Variable | Required value |
 | --- | --- |
-| `PHYSIOTRACK_MIGRATOR_DATABASE_URL` | `postgresql+psycopg://<role>:<percent-encoded-password>@<host>:5432/<database>` |
+| `PHYSIOTRACK_MIGRATOR_DATABASE_URL` | `postgresql://<role>:<percent-encoded-password>@<host>:5432[/<database>]` or `postgresql+psycopg://...` |
 | `PHYSIOTRACK_MIGRATOR_DATABASE_NAME` | Exact, explicit name of the pre-provisioned dedicated database |
 
 There are no defaults, `.env` loading, generic `DATABASE_URL` or API/Aspire
-fallbacks. Username, password, host and database must be explicit. Only the
-`postgresql+psycopg` driver is accepted. The only optional URL query parameter is
-`sslmode` (`disable`, `allow`, `prefer`, `require`, `verify-ca`, `verify-full`);
-use certificate verification where appropriate. URL-encode special characters
-in credentials. Do not put credentials in command arguments or source control.
+fallbacks. Username, password, host and database must be explicit. Native
+`postgresql://` URLs are normalized to the installed `postgresql+psycopg` driver.
+If the URL has no database path, the explicit `PHYSIOTRACK_MIGRATOR_DATABASE_NAME`
+is applied; if it does, the path must match that name. Explicit
+`postgresql+psycopg://` URLs are also accepted. The only optional URL query
+parameter is `sslmode` (`disable`, `allow`, `prefer`, `require`, `verify-ca`,
+`verify-full`); use certificate verification where appropriate. URL-encode special
+characters in credentials. Do not put credentials in command arguments or source
+control.
 
 The runner checks `current_database()` before DDL and refuses `postgres`,
 `template0`, `template1`, privileged roles, foreign schemas/objects, unmarked

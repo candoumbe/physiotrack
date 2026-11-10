@@ -19,6 +19,14 @@ def test_dedicated_configuration():
     assert "synthetic-secret" not in repr(settings)
 
 
+def test_native_postgresql_server_url_uses_explicit_database_and_psycopg_driver():
+    settings = Settings.from_environ(
+        configured("postgresql://migrator:synthetic-secret@localhost:5432")
+    )
+    assert settings.url.drivername == "postgresql+psycopg"
+    assert settings.url.database == "physio_test"
+
+
 @pytest.mark.parametrize(
     "values",
     [
@@ -27,7 +35,6 @@ def test_dedicated_configuration():
         {"PHYSIOTRACK_MIGRATOR_DATABASE_NAME": "physio_test"},
         configured("invalid-synthetic-secret"),
         configured("sqlite:///physio_test"),
-        configured("postgresql://migrator:synthetic-secret@localhost/physio_test"),
         configured("postgresql+psycopg://migrator:synthetic-secret@localhost/other"),
         configured(
             "postgresql+psycopg://migrator:synthetic-secret@localhost:bad/physio_test"
