@@ -1,4 +1,5 @@
 import os
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -8,8 +9,11 @@ from zipfile import ZipFile
 import pytest
 from alembic import command
 from alembic.script import ScriptDirectory
+from sqlalchemy.engine import URL
 
 from physiotrack_migrator import cli, runner
+from physiotrack_migrator.config import ProvisioningSettings, Settings
+from physiotrack_migrator.runner import ProvisioningError
 
 
 @pytest.fixture
@@ -23,7 +27,9 @@ def source_checkout(tmp_path, monkeypatch):
         runner, "__file__", str(checkout / "src/physiotrack_migrator/runner.py")
     )
     monkeypatch.delenv("PHYSIOTRACK_MIGRATOR_DATABASE_URL", raising=False)
+    monkeypatch.delenv("PHYSIOTRACK_MIGRATOR_BOOTSTRAP_DATABASE_URL", raising=False)
     monkeypatch.delenv("PHYSIOTRACK_MIGRATOR_DATABASE_NAME", raising=False)
+    monkeypatch.delenv("PHYSIOTRACK_MIGRATOR_PASSWORD", raising=False)
     monkeypatch.setenv("UV_NO_SYNC", "1")
     monkeypatch.setenv(
         "UV_PROJECT_ENVIRONMENT", str(Path(sys.executable).parent.parent)
@@ -53,6 +59,190 @@ def test_create_delete_round_trip_without_database(source_checkout, capsys):
     assert cli.main(["delete"]) == 0
     assert {path.name: path.read_bytes() for path in versions.glob("*.py")} == before
     assert "deleted" in capsys.readouterr().out.lower()
+
+
+def test_up_dispatches_internal_provisioning_without_printing_secrets(
+    monkeypatch, capsys
+):
+    admin_password = secrets.token_urlsafe(32)
+    migrator_password = secrets.token_urlsafe(32)
+    bootstrap_url = URL.create(
+        "postgresql+psycopg",
+        username="postgres",
+        password=admin_password,
+        host="localhost",
+        database="physiotrack",
+    ).render_as_string(hide_password=False)
+    runtime_url = URL.create(
+        "postgresql+psycopg",
+        username="physiotrack_migrator",
+        password=migrator_password,
+        host="localhost",
+        database="physiotrack",
+    ).render_as_string(hide_password=False)
+    monkeypatch.setenv("PHYSIOTRACK_MIGRATOR_BOOTSTRAP_DATABASE_URL", bootstrap_url)
+    monkeypatch.setenv("PHYSIOTRACK_MIGRATOR_DATABASE_URL", runtime_url)
+    monkeypatch.setenv("PHYSIOTRACK_MIGRATOR_DATABASE_NAME", "physiotrack")
+    monkeypatch.setenv("PHYSIOTRACK_MIGRATOR_PASSWORD", migrator_password)
+    calls = []
+    monkeypatch.setattr(
+        cli,
+        "provision_and_migrate",
+        lambda settings, revision, provisioning: (
+            calls.append(
+                (
+                    settings.runtime_url.username,
+                    provisioning.bootstrap_url.username,
+                    revision,
+                )
+            )
+            or "0002_dedicated_measurements"
+        ),
+    )
+    monkeypatch.setattr(
+        cli, "migrate", lambda *_: pytest.fail("Expected bootstrap-enabled up.")
+    )
+
+    assert cli.main(["up"]) == 0
+    output = capsys.readouterr()
+    assert calls == [("physiotrack_migrator", "postgres", "head")]
+    assert output.out.strip() == "revision: 0002_dedicated_measurements"
+    assert admin_password not in output.out + output.err
+    assert migrator_password not in output.out + output.err
+
+
+def test_runner_provisions_before_migrating_with_restricted_runtime_settings(
+    monkeypatch,
+):
+    migrator_password = secrets.token_urlsafe(32)
+    provisioning = ProvisioningSettings.from_environ(
+        {
+            "PHYSIOTRACK_MIGRATOR_BOOTSTRAP_DATABASE_URL": "postgresql+psycopg://postgres:bootstrap-secret@localhost/physiotrack",
+            "PHYSIOTRACK_MIGRATOR_DATABASE_NAME": "physiotrack",
+            "PHYSIOTRACK_MIGRATOR_PASSWORD": migrator_password,
+        }
+    )
+    settings = Settings.from_environ(
+        {
+            "PHYSIOTRACK_MIGRATOR_DATABASE_URL": f"postgresql+psycopg://physiotrack_migrator:{migrator_password}@localhost/physiotrack",
+            "PHYSIOTRACK_MIGRATOR_DATABASE_NAME": "physiotrack",
+        }
+    )
+    calls = []
+    monkeypatch.setattr(
+        runner,
+        "provision",
+        lambda value: calls.append(("provision", value.bootstrap_url.username)),
+    )
+    monkeypatch.setattr(
+        runner,
+        "migrate",
+        lambda value, action, revision: (
+            calls.append(("migrate", value.runtime_url.username, action, revision))
+            or "0002_dedicated_measurements"
+        ),
+    )
+
+    assert runner.provision_and_migrate(settings, "head", provisioning) == (
+        "0002_dedicated_measurements"
+    )
+    assert calls == [
+        ("provision", "postgres"),
+        ("migrate", "physiotrack_migrator", "up", "head"),
+    ]
+
+
+def test_up_without_bootstrap_keeps_existing_runtime_migration_path(monkeypatch):
+    monkeypatch.delenv("PHYSIOTRACK_MIGRATOR_BOOTSTRAP_DATABASE_URL", raising=False)
+    monkeypatch.setenv(
+        "PHYSIOTRACK_MIGRATOR_DATABASE_URL",
+        "postgresql+psycopg://migrator:runtime-secret@localhost/physiotrack",
+    )
+    monkeypatch.setenv("PHYSIOTRACK_MIGRATOR_DATABASE_NAME", "physiotrack")
+    calls = []
+    monkeypatch.setattr(
+        cli,
+        "provision_and_migrate",
+        lambda *_: pytest.fail("Provisioning is optional without a bootstrap URI."),
+    )
+    monkeypatch.setattr(
+        cli,
+        "migrate",
+        lambda settings, action, revision: (
+            calls.append((settings.runtime_url.username, action, revision))
+            or "0002_dedicated_measurements"
+        ),
+    )
+
+    assert cli.main(["up"]) == 0
+    assert calls == [("migrator", "up", "head")]
+
+
+def test_up_rejects_bootstrap_mismatch_before_provisioning(monkeypatch, capsys):
+    monkeypatch.setenv(
+        "PHYSIOTRACK_MIGRATOR_BOOTSTRAP_DATABASE_URL",
+        "postgresql+psycopg://postgres:bootstrap-secret@localhost/physiotrack",
+    )
+    monkeypatch.setenv(
+        "PHYSIOTRACK_MIGRATOR_DATABASE_URL",
+        "postgresql+psycopg://physiotrack_migrator:wrong-secret-credential-long-enough-32@localhost/physiotrack",
+    )
+    monkeypatch.setenv("PHYSIOTRACK_MIGRATOR_DATABASE_NAME", "physiotrack")
+    monkeypatch.setenv(
+        "PHYSIOTRACK_MIGRATOR_PASSWORD", "migrator-secret-credential-long-enough-32"
+    )
+    monkeypatch.setattr(
+        runner,
+        "provision",
+        lambda *_: pytest.fail("A mismatched bootstrap must not provision."),
+    )
+    monkeypatch.setattr(
+        runner,
+        "migrate",
+        lambda *_: pytest.fail("A mismatched bootstrap must not migrate."),
+    )
+
+    assert cli.main(["up"]) == 2
+    error = capsys.readouterr().err
+    assert "same dedicated database" in error
+    assert "bootstrap-secret" not in error
+    assert "wrong-secret" not in error
+
+
+def test_up_provisioning_failure_does_not_run_migrations_or_leak_error(
+    monkeypatch, capsys
+):
+    migrator_password = secrets.token_urlsafe(32)
+    monkeypatch.setenv(
+        "PHYSIOTRACK_MIGRATOR_BOOTSTRAP_DATABASE_URL",
+        "postgresql+psycopg://postgres:synthetic-secret@localhost/physiotrack",
+    )
+    monkeypatch.setenv(
+        "PHYSIOTRACK_MIGRATOR_DATABASE_URL",
+        f"postgresql+psycopg://physiotrack_migrator:{migrator_password}@localhost/physiotrack",
+    )
+    monkeypatch.setenv("PHYSIOTRACK_MIGRATOR_DATABASE_NAME", "physiotrack")
+    monkeypatch.setenv("PHYSIOTRACK_MIGRATOR_PASSWORD", migrator_password)
+    monkeypatch.setattr(
+        runner, "provision", lambda *_: (_ for _ in ()).throw(ProvisioningError())
+    )
+
+    def forbidden(*args):
+        pytest.fail("Migrations must not run when provisioning fails.")
+
+    monkeypatch.setattr(runner, "migrate", forbidden)
+    assert cli.main(["up"]) == 1
+    output = capsys.readouterr()
+    assert "Role provisioning failed" in output.err
+    assert "synthetic-secret" not in output.out + output.err
+
+
+@pytest.mark.parametrize("command", ["provision", "provision-up"])
+def test_cli_has_no_separate_provisioning_verbs(command, capsys):
+    with pytest.raises(SystemExit) as raised:
+        cli.main([command])
+    assert raised.value.code == 2
+    assert "Invalid command or arguments" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("message", ["", " ", "\t\n"])

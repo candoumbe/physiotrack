@@ -1,5 +1,9 @@
 """Transactional Alembic execution against a checked, isolated target."""
 
+import base64
+import hashlib
+import hmac
+import secrets
 from pathlib import Path
 
 from alembic import command
@@ -8,10 +12,15 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from alembic.script.revision import RevisionError
 from alembic.util import CommandError
+from psycopg import sql
 from sqlalchemy import Connection, create_engine, text
 from sqlalchemy.pool import NullPool
 
-from physiotrack_migrator.config import Settings
+from physiotrack_migrator.config import (
+    MIGRATOR_ROLE,
+    ProvisioningSettings,
+    Settings,
+)
 
 OWNER_MARKER = "physiotrack-migrator"
 MEASUREMENT_TABLES = {
@@ -23,6 +32,10 @@ MEASUREMENT_TABLES = {
 
 
 class TargetError(RuntimeError):
+    pass
+
+
+class ProvisioningError(RuntimeError):
     pass
 
 
@@ -170,6 +183,129 @@ def checked_target(
         raise TargetError()
 
 
+def _scram_verifier(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    salted_password = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt, 4096
+    )
+    client_key = hmac.new(salted_password, b"Client Key", hashlib.sha256).digest()
+    stored_key = hashlib.sha256(client_key).digest()
+    server_key = hmac.new(salted_password, b"Server Key", hashlib.sha256).digest()
+    encode = lambda value: base64.b64encode(value).decode("ascii")
+    return (
+        f"SCRAM-SHA-256$4096:{encode(salt)}${encode(stored_key)}:{encode(server_key)}"
+    )
+
+
+def _execute_composed(connection: Connection, statement: sql.Composable) -> None:
+    driver_connection = connection.connection.driver_connection
+    connection.exec_driver_sql(statement.as_string(driver_connection))
+
+
+def provision(settings: ProvisioningSettings) -> None:
+    engine = create_engine(
+        settings.bootstrap_url,
+        poolclass=NullPool,
+        hide_parameters=True,
+        connect_args={
+            "connect_timeout": 5,
+            "application_name": "physiotrack-migrator-bootstrap",
+        },
+    )
+    try:
+        with engine.begin() as connection:
+            actual_name, current_user = connection.execute(
+                text("SELECT current_database(), current_user")
+            ).one()
+            if actual_name != settings.database_name or current_user == MIGRATOR_ROLE:
+                raise ProvisioningError()
+
+            schema_owner = connection.scalar(
+                text(
+                    "SELECT pg_get_userbyid(nspowner) FROM pg_namespace "
+                    "WHERE nspname = 'public'"
+                )
+            )
+            if schema_owner not in {current_user, "pg_database_owner", MIGRATOR_ROLE}:
+                raise ProvisioningError()
+
+            has_foreign_owner = connection.scalar(
+                text(
+                    "SELECT EXISTS (SELECT 1 FROM pg_class c "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = 'public' AND c.relkind NOT IN ('i', 'I', 't') "
+                    "AND pg_get_userbyid(c.relowner) <> :role)"
+                ),
+                {"role": MIGRATOR_ROLE},
+            )
+            if has_foreign_owner:
+                raise ProvisioningError()
+
+            role_exists = connection.scalar(
+                text("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :role)"),
+                {"role": MIGRATOR_ROLE},
+            )
+            if role_exists:
+                memberships = connection.execute(
+                    text(
+                        "SELECT granted.rolname, member.rolname FROM pg_auth_members m "
+                        "JOIN pg_roles granted ON granted.oid = m.roleid "
+                        "JOIN pg_roles member ON member.oid = m.member "
+                        "WHERE granted.rolname = :role OR member.rolname = :role"
+                    ),
+                    {"role": MIGRATOR_ROLE},
+                ).all()
+                for granted_role, member_role in memberships:
+                    revoked_role = (
+                        MIGRATOR_ROLE if granted_role == MIGRATOR_ROLE else granted_role
+                    )
+                    revoked_member = (
+                        member_role if granted_role == MIGRATOR_ROLE else MIGRATOR_ROLE
+                    )
+                    _execute_composed(
+                        connection,
+                        sql.SQL("REVOKE {} FROM {}").format(
+                            sql.Identifier(revoked_role), sql.Identifier(revoked_member)
+                        ),
+                    )
+
+            role_statement = sql.SQL(
+                "{} ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE "
+                "NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD {}"
+            ).format(
+                sql.SQL("ALTER") if role_exists else sql.SQL("CREATE"),
+                sql.Identifier(MIGRATOR_ROLE),
+                sql.Literal(_scram_verifier(settings.migrator_password)),
+            )
+            _execute_composed(connection, role_statement)
+
+            _execute_composed(
+                connection,
+                sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(
+                    sql.Identifier(settings.database_name),
+                    sql.Identifier(MIGRATOR_ROLE),
+                ),
+            )
+            _execute_composed(
+                connection,
+                sql.SQL("ALTER SCHEMA public OWNER TO {}").format(
+                    sql.Identifier(MIGRATOR_ROLE)
+                ),
+            )
+            _execute_composed(
+                connection,
+                sql.SQL("GRANT USAGE, CREATE ON SCHEMA public TO {}").format(
+                    sql.Identifier(MIGRATOR_ROLE)
+                ),
+            )
+    except ProvisioningError:
+        raise
+    except Exception as error:
+        raise ProvisioningError() from error
+    finally:
+        engine.dispose()
+
+
 def migrate(settings: Settings, action: str, revision: str | None = None) -> str:
     config = migration_config()
     scripts = ScriptDirectory.from_config(config)
@@ -179,7 +315,7 @@ def migrate(settings: Settings, action: str, revision: str | None = None) -> str
     if action != "status":
         scripts.get_revision(revision)
     engine = create_engine(
-        settings.url,
+        settings.runtime_url,
         poolclass=NullPool,
         hide_parameters=True,
         connect_args={
@@ -208,3 +344,11 @@ def migrate(settings: Settings, action: str, revision: str | None = None) -> str
             return revisions[0] if revisions else "base"
     finally:
         engine.dispose()
+
+
+def provision_and_migrate(
+    settings: Settings, revision: str, provisioning: ProvisioningSettings
+) -> str:
+    provisioning.validate_runtime(settings)
+    provision(provisioning)
+    return migrate(settings, "up", revision)

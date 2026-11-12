@@ -1,5 +1,6 @@
 import importlib
 import math
+import secrets
 import socket
 import subprocess
 import sys
@@ -18,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from physiotrack_migrator import cli
-from physiotrack_migrator.config import Settings
+from physiotrack_migrator.config import MIGRATOR_ROLE, ProvisioningSettings, Settings
 from physiotrack_migrator.models import (
     ActivityMeasurement,
     Base,
@@ -26,7 +27,12 @@ from physiotrack_migrator.models import (
     HeartRateMeasurement,
     SleepMeasurement,
 )
-from physiotrack_migrator.runner import TargetError, migrate
+from physiotrack_migrator.runner import (
+    ProvisioningError,
+    TargetError,
+    migrate,
+    provision,
+)
 
 pytestmark = pytest.mark.integration
 HEAD = "0002_dedicated_measurements"
@@ -427,6 +433,80 @@ def test_check_connected_name_and_role(database, engine):
     with pytest.raises(TargetError):
         migrate(Settings(database.admin_url, database.url.database), "up", "head")
     assert schema(engine) == {}
+
+
+def test_provision_is_idempotent_and_migrations_use_the_restricted_role(database):
+    password = secrets.token_urlsafe(32)
+    migration_url = database.url.set(username=MIGRATOR_ROLE, password=password)
+    migration_engine = sa.create_engine(migration_url, hide_parameters=True)
+    admin_engine = sa.create_engine(database.admin_url, hide_parameters=True)
+    try:
+        environment = database.environ
+        environment["PHYSIOTRACK_MIGRATOR_BOOTSTRAP_DATABASE_URL"] = (
+            database.admin_url.render_as_string(hide_password=False)
+        )
+        environment["PHYSIOTRACK_MIGRATOR_PASSWORD"] = password
+        environment["PHYSIOTRACK_MIGRATOR_DATABASE_URL"] = (
+            migration_url.render_as_string(hide_password=False)
+        )
+        for _ in range(2):
+            result = run_cli(database, "up", environ=environment)
+            assert result.returncode == 0, result.stderr
+
+        with admin_engine.connect() as connection:
+            assert connection.execute(
+                sa.text(
+                    "SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, "
+                    "rolbypassrls FROM pg_roles WHERE rolname = :role"
+                ),
+                {"role": MIGRATOR_ROLE},
+            ).one() == (False, False, False, False, False)
+
+        with migration_engine.connect() as connection:
+            assert connection.scalar(sa.text("SELECT current_user")) == MIGRATOR_ROLE
+            assert connection.scalar(
+                sa.text(
+                    "SELECT bool_and(pg_get_userbyid(c.relowner) = current_user) "
+                    "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')"
+                )
+            )
+    finally:
+        admin_engine.dispose()
+        migration_engine.dispose()
+
+
+def test_provision_refuses_to_reassign_objects_owned_by_another_role(database):
+    admin_engine = sa.create_engine(database.admin_url, hide_parameters=True)
+    password = secrets.token_urlsafe(32)
+    provisioning = ProvisioningSettings(
+        database.admin_url, database.url.database, password
+    )
+    try:
+        with admin_engine.begin() as connection:
+            connection.execute(
+                sa.text("CREATE TABLE public.foreign_owned_provision_test (id integer)")
+            )
+            owner_before = connection.scalar(
+                sa.text(
+                    "SELECT pg_get_userbyid(relowner) FROM pg_class "
+                    "WHERE oid = 'public.foreign_owned_provision_test'::regclass"
+                )
+            )
+
+        with pytest.raises(ProvisioningError):
+            provision(provisioning)
+
+        with admin_engine.connect() as connection:
+            owner_after = connection.scalar(
+                sa.text(
+                    "SELECT pg_get_userbyid(relowner) FROM pg_class "
+                    "WHERE oid = 'public.foreign_owned_provision_test'::regclass"
+                )
+            )
+        assert owner_after == owner_before
+    finally:
+        admin_engine.dispose()
 
 
 @pytest.mark.parametrize(
