@@ -1,16 +1,23 @@
 """Bounded, redacted command-line interface."""
 
 import argparse
+import os
 import sys
 from collections.abc import Sequence
 
-from physiotrack_migrator.config import ConfigurationError, Settings
+from physiotrack_migrator.config import (
+    ConfigurationError,
+    ProvisioningSettings,
+    Settings,
+)
 from physiotrack_migrator.migration_safety_error import MigrationSafetyError
 from physiotrack_migrator.runner import (
     LocalRevisionError,
+    ProvisioningError,
     TargetError,
     edit_revision,
     migrate,
+    provision_and_migrate,
 )
 
 
@@ -21,7 +28,7 @@ class Parser(argparse.ArgumentParser):
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = Parser(
-        description="Migrate only a pre-provisioned dedicated Physiotrack database."
+        description="Migrate a dedicated Physiotrack database with a restricted role."
     )
     commands = parser.add_subparsers(dest="command", required=True, parser_class=Parser)
     up = commands.add_parser("up", help="Apply schema migrations (default: head).")
@@ -59,13 +66,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 0
         settings = Settings.from_environ()
-        revision = migrate(settings, args.command, getattr(args, "revision", None))
+        if args.command == "up" and os.environ.get(
+            "PHYSIOTRACK_MIGRATOR_BOOTSTRAP_DATABASE_URL"
+        ):
+            provisioning = ProvisioningSettings.from_environ()
+            revision = provision_and_migrate(settings, args.revision, provisioning)
+        else:
+            revision = migrate(settings, args.command, getattr(args, "revision", None))
     except LocalRevisionError as error:
         print(str(error), file=sys.stderr)
         return 2
     except ConfigurationError as error:
         print(str(error), file=sys.stderr)
         return 2
+    except ProvisioningError:
+        print(
+            "Role provisioning failed: verify the dedicated target and existing object ownership.",
+            file=sys.stderr,
+        )
+        return 1
     except TargetError:
         print(
             "Database target rejected: verify dedication, role and migration ownership.",

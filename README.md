@@ -101,15 +101,16 @@ See [CHANGELOG.md](CHANGELOG.md) for a detailed history of changes.
 ## Standalone schema migrations
 
 The independent [migrator](migrator/README.md) manages only the schema of a
-pre-provisioned dedicated PostgreSQL database. The API remains **in-memory**;
-no database configuration is required to run it. Migrations do not start an API,
-create a database or enable business persistence.
+dedicated PostgreSQL database. `make migrate-up` can provision its restricted
+migration role when the optional bootstrap URI is configured. The API remains
+**in-memory**; no database configuration is required to run it. Migrations do not
+start an API, create a database or enable business persistence.
 
 ```bash
 uv sync --project migrator --frozen
-uv run --project migrator --frozen physiotrack-migrator up
-uv run --project migrator --frozen physiotrack-migrator status
-uv run --project migrator --frozen physiotrack-migrator down
+make migrate-up
+make migrate-status
+make migrate-down
 ```
 
 Make shortcuts from the Physiotrack root (also listed by `make help`):
@@ -143,8 +144,11 @@ as a substitute for a new corrective migration.
 CLI defaults remain `head` and `base`, respectively. From the MedEasy root,
 use `make -C physiotrack <target>`.
 
-For `up`, `down` and `status`, set `PHYSIOTRACK_MIGRATOR_DATABASE_URL` and
-`PHYSIOTRACK_MIGRATOR_DATABASE_NAME` first, as described in the migrator guide.
+For `migrate-up`, `migrate-down` and `migrate-status`, set
+`PHYSIOTRACK_MIGRATOR_DATABASE_URL` and `PHYSIOTRACK_MIGRATOR_DATABASE_NAME`;
+`migrate-up` also provisions the restricted role first when the optional
+`PHYSIOTRACK_MIGRATOR_BOOTSTRAP_DATABASE_URL` and
+`PHYSIOTRACK_MIGRATOR_PASSWORD` are set, as described in the migrator guide.
 `down` to base is destructive: it removes the four dedicated measurement tables
 and their data, never the database. Revision `0002_dedicated_measurements` safely
 splits existing measurements by type; rollback to `0001_measurements` merges

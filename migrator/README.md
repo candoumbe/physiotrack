@@ -8,22 +8,47 @@ running this project does not enable API persistence or transfer any data.
 ## Dedicated database prerequisite
 
 A database administrator must **pre-provision an empty, dedicated PostgreSQL
-database** and a distinct migration role. Give that role access only to this
-database and permission to create objects in its `public` schema. The role must
-not be a superuser or have `CREATEDB`. Never use an existing Agenda, Documents,
-Aspire, shared or production database to try the migrator or its tests.
+database** and provide a bootstrap account with access to it. The migrator
+idempotently creates the distinct restricted migration role. Never use an
+existing Agenda, Documents, Aspire, shared or production database to try the
+migrator or its tests.
 
-Database provisioning is separate from schema migration: this executable never
-creates or drops databases, never drops schemas, and never uses `CASCADE`.
+The MedEasy Aspire AppHost runs one ephemeral `physiotrackMigrator` container
+with the existing `up` command. It receives the PostgreSQL bootstrap URI and the
+restricted-role runtime URI as secret environment values. When the bootstrap URI
+is configured, `up` provisions the role first and then runs migrations using only
+the runtime URI. The API waits for this same container to complete and receives
+no database credentials because it remains in-memory. Aspire generates and
+stores the secret parameter `physiotrackMigratorPassword` for the migration role.
+
+Provisioning is repeatable and also runs against an already-initialized
+PostgreSQL volume. It does not create databases or reassign existing objects.
+If an object in `public` belongs to another role, provisioning stops and the
+migrator's ownership/marker checks remain in force; resolve that state through
+a reviewed database operation before retrying. No automatic ownership transfer
+is performed.
+
+Database creation remains separate from role provisioning and schema migration:
+this executable never creates or drops databases, never drops schemas, and never
+uses `CASCADE`.
 The expected-name check cannot prove dedication; restricted credentials and
 correct provisioning remain mandatory.
 
-Supply both environment variables through your shell or secret manager:
+Supply the runtime connection settings through your shell or secret manager:
 
 | Variable | Required value |
 | --- | --- |
 | `PHYSIOTRACK_MIGRATOR_DATABASE_URL` | `postgresql://<role>:<percent-encoded-password>@<host>:5432[/<database>]` or `postgresql+psycopg://...` |
 | `PHYSIOTRACK_MIGRATOR_DATABASE_NAME` | Exact, explicit name of the pre-provisioned dedicated database |
+
+`migrate-up` can additionally provision the restricted role when these optional
+bootstrap settings are configured. The bootstrap URI must connect to the same
+dedicated database and is never passed to the migration runner:
+
+| Variable | Required value |
+| --- | --- |
+| `PHYSIOTRACK_MIGRATOR_BOOTSTRAP_DATABASE_URL` | PostgreSQL administrator/bootstrap URI for the dedicated database |
+| `PHYSIOTRACK_MIGRATOR_PASSWORD` | Secret password to assign to `physiotrack_migrator` (at least 32 characters) |
 
 There are no defaults, `.env` loading, generic `DATABASE_URL` or API/Aspire
 fallbacks. Username, password, host and database must be explicit. Native
@@ -50,33 +75,30 @@ database, ownership or migration failures. `status` never creates schema objects
 
 ## Install and run
 
-From the Physiotrack repository root:
+From the Physiotrack repository root, use the existing Makefile targets:
 
 ```bash
 uv sync --project migrator --frozen
-uv run --project migrator --frozen physiotrack-migrator status
-uv run --project migrator --frozen physiotrack-migrator up
-uv run --project migrator --frozen physiotrack-migrator down
+make migrate-up
+make migrate-status
+make migrate-down
+make migrate-down REVISION=base
 ```
 
-Or from this directory, without installing the API:
+From the MedEasy root, use `make -C physiotrack <target>`. The Makefile passes
+environment settings through to the existing CLI; use `uv sync --project
+migrator --frozen --no-dev` for runtime dependencies only. The committed lockfile
+fixes runtime and test dependency versions.
 
-```bash
-uv sync --frozen
-uv run --frozen physiotrack-migrator up
-uv run --frozen physiotrack-migrator status
-uv run --frozen physiotrack-migrator down --revision base
-```
-
-From the MedEasy root use `--project physiotrack/migrator`. Once installed, the
-console script can run from any working directory; migration files are packaged
-with the executable. Use `uv sync --frozen --no-dev` for runtime dependencies only.
-The committed lockfile fixes runtime and test dependency versions.
-
-`up` defaults to `head`; `down` defaults to `base`. Both accept `--revision`, for
-example `up --revision 0001_measurements`. `status` prints `revision: base` or
-the installed revision. Repeating `up` at head or `down` at base is a no-op.
-Migrations and their Alembic revision changes are transactional.
+`migrate-up` invokes the existing `up` command (default revision `head`). If the
+bootstrap URI is configured, it validates that both URLs identify the same
+database and that the runtime URL carries the generated migrator credential;
+then it provisions the role and immediately migrates with that restricted role.
+Without a bootstrap URI, `up` retains its existing runtime-only behavior.
+`migrate-down` defaults to `base`; `migrate-status` prints `revision: base` or
+the installed revision. The targets accept `REVISION` where applicable. Repeating
+`migrate-up` at head or `migrate-down` at base is a no-op. Migrations and their
+Alembic revision changes are transactional.
 
 **Rollback to base is destructive:** `down` to base drops all owned measurement
 tables and **all their rows**. It leaves the database and an empty, marked
@@ -205,14 +227,17 @@ docker build -t physiotrack-migrator:local migrator
 docker run --rm --network <dedicated-database-network> \
   --env PHYSIOTRACK_MIGRATOR_DATABASE_URL \
   --env PHYSIOTRACK_MIGRATOR_DATABASE_NAME \
+  --env PHYSIOTRACK_MIGRATOR_BOOTSTRAP_DATABASE_URL \
+  --env PHYSIOTRACK_MIGRATOR_PASSWORD \
   physiotrack-migrator:local up
 ```
 
-Use the same command with `status`, `down` or `down --revision base`. The URL host
-must be reachable from the selected container network (not the container's own
-`localhost`). The image runs as a non-root user, contains only installed runtime
-dependencies and packaged migrations, opens no server port and exits after the
-command. Its build context excludes virtual environments, secrets and tests.
+Use only the runtime URL and database name with `up`, `status`, `down` or
+`down --revision base`. The URL host must be reachable from the selected
+container network (not the container's own `localhost`). The image runs as a
+non-root user, contains only installed runtime dependencies and packaged
+migrations, opens no server port and exits after the command. Its build context
+excludes virtual environments, secrets and tests.
 
 ## Validation
 
