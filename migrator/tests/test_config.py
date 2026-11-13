@@ -1,6 +1,7 @@
 import pytest
 
 from physiotrack_migrator.config import (
+    API_ROLE,
     ConfigurationError,
     ProvisioningSettings,
     Settings,
@@ -66,6 +67,46 @@ def test_bootstrap_configuration_matches_migrator_runtime_target():
     )
 
     provisioning.validate_runtime(runtime)
+
+
+def test_separate_fields_preserve_special_characters_and_hide_secrets():
+    values = {
+        "PHYSIOTRACK_MIGRATOR_HOST": "localhost",
+        "PHYSIOTRACK_MIGRATOR_PORT": "5432",
+        "PHYSIOTRACK_MIGRATOR_DATABASE_NAME": "physio_test",
+        "PHYSIOTRACK_MIGRATOR_BOOTSTRAP_USERNAME": "postgres",
+        "PHYSIOTRACK_MIGRATOR_BOOTSTRAP_PASSWORD": "bootstrap:@/long-secret",
+        "PHYSIOTRACK_MIGRATOR_PASSWORD": "migrator:@/" + "m" * 32,
+        "PHYSIOTRACK_API_PASSWORD": "api:@/" + "a" * 32,
+    }
+    settings = Settings.from_environ(values)
+    provisioning = ProvisioningSettings.from_environ(values)
+    provisioning.validate_runtime(settings)
+    assert settings.runtime_url.password == values["PHYSIOTRACK_MIGRATOR_PASSWORD"]
+    assert (
+        provisioning.bootstrap_url.password
+        == values["PHYSIOTRACK_MIGRATOR_BOOTSTRAP_PASSWORD"]
+    )
+    assert provisioning.api_password == values["PHYSIOTRACK_API_PASSWORD"]
+    assert API_ROLE != settings.runtime_url.username
+    assert all(
+        value not in repr(provisioning)
+        for key, value in values.items()
+        if "PASSWORD" in key
+    )
+
+
+@pytest.mark.parametrize("api_password", ["short", "m" * 32, "b" * 32])
+def test_api_secret_must_be_long_and_distinct(api_password):
+    with pytest.raises(ConfigurationError):
+        ProvisioningSettings.from_environ(
+            {
+                "PHYSIOTRACK_MIGRATOR_DATABASE_NAME": "physio_test",
+                "PHYSIOTRACK_MIGRATOR_BOOTSTRAP_DATABASE_URL": f"postgresql://postgres:{'b' * 32}@localhost/physio_test",
+                "PHYSIOTRACK_MIGRATOR_PASSWORD": "m" * 32,
+                "PHYSIOTRACK_API_PASSWORD": api_password,
+            }
+        )
 
 
 @pytest.mark.parametrize(

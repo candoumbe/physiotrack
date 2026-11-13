@@ -66,8 +66,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 0
         settings = Settings.from_environ()
-        if args.command == "up" and os.environ.get(
-            "PHYSIOTRACK_MIGRATOR_BOOTSTRAP_DATABASE_URL"
+        if args.command == "up" and (
+            os.environ.get("PHYSIOTRACK_MIGRATOR_BOOTSTRAP_DATABASE_URL")
+            or os.environ.get("PHYSIOTRACK_MIGRATOR_BOOTSTRAP_USERNAME")
         ):
             provisioning = ProvisioningSettings.from_environ()
             revision = provision_and_migrate(settings, args.revision, provisioning)

@@ -13,13 +13,13 @@ idempotently creates the distinct restricted migration role. Never use an
 existing Agenda, Documents, Aspire, shared or production database to try the
 migrator or its tests.
 
-The MedEasy Aspire AppHost runs one ephemeral `physiotrackMigrator` container
-with the existing `up` command. It receives the PostgreSQL bootstrap URI and the
-restricted-role runtime URI as secret environment values. When the bootstrap URI
-is configured, `up` provisions the role first and then runs migrations using only
-the runtime URI. The API waits for this same container to complete and receives
-no database credentials because it remains in-memory. Aspire generates and
-stores the secret parameter `physiotrackMigratorPassword` for the migration role.
+The MedEasy Aspire AppHost creates a dedicated PostgreSQL database and builds the
+migrator image from this checkout. Its one-shot container provisions the roles
+and runs `up` as `physiotrack_migrator`. Aspire generates separate persisted
+bootstrap, migrator and `physiotrack_api` passwords. Only the migrator container
+receives bootstrap and migration credentials. The API receives only its own
+database fields and waits for migration to finish; it currently ignores those
+fields and remains in-memory. This configuration does not enable persistence.
 
 Provisioning is repeatable and also runs against an already-initialized
 PostgreSQL volume. It does not create databases or reassign existing objects.
@@ -49,6 +49,26 @@ dedicated database and is never passed to the migration runner:
 | --- | --- |
 | `PHYSIOTRACK_MIGRATOR_BOOTSTRAP_DATABASE_URL` | PostgreSQL administrator/bootstrap URI for the dedicated database |
 | `PHYSIOTRACK_MIGRATOR_PASSWORD` | Secret password to assign to `physiotrack_migrator` (at least 32 characters) |
+| `PHYSIOTRACK_API_PASSWORD` | Optional distinct secret password for `physiotrack_api` (at least 32 characters) |
+
+When the API password is supplied, provisioning creates or refreshes a
+non-owning, non-privileged login without role memberships. It removes `PUBLIC`
+database privileges and schema `CREATE`, grants API access to measurement data
+and configures default table and sequence privileges for objects created by the
+migrator. The API cannot access `alembic_version`. Unexpected schemas,
+functions or extensions, foreign owners, and an API role owning any object are
+rejected rather than reassigned. Database `PUBLIC` privileges are revoked for
+the dedicated database, so other accounts must be granted access explicitly.
+The bootstrap user must be able to manage roles, schema ownership and the
+migrator's default privileges. Existing objects are not transferred.
+
+Aspire supplies `PHYSIOTRACK_MIGRATOR_HOST`, `PHYSIOTRACK_MIGRATOR_PORT`,
+`PHYSIOTRACK_MIGRATOR_BOOTSTRAP_USERNAME` and
+`PHYSIOTRACK_MIGRATOR_BOOTSTRAP_PASSWORD` instead of URIs; the migrator builds
+connection URLs internally without interpolating passwords. URI configuration
+remains supported. The AppHost builds the local migrator source: a deployment
+using a separately published migrator image must publish and select an image
+containing these changes before enabling the API role.
 
 There are no defaults, `.env` loading, generic `DATABASE_URL` or API/Aspire
 fallbacks. Username, password, host and database must be explicit. Native
