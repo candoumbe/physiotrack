@@ -19,7 +19,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from physiotrack_migrator import cli
-from physiotrack_migrator.config import MIGRATOR_ROLE, ProvisioningSettings, Settings
+from physiotrack_migrator.config import (
+    API_ROLE,
+    MIGRATOR_ROLE,
+    ProvisioningSettings,
+    Settings,
+)
 from physiotrack_migrator.models import (
     ActivityMeasurement,
     Base,
@@ -474,6 +479,127 @@ def test_provision_is_idempotent_and_migrations_use_the_restricted_role(database
     finally:
         admin_engine.dispose()
         migration_engine.dispose()
+
+
+def test_api_role_data_access_denial_and_future_migration_grants(database):
+    migrator_password = secrets.token_urlsafe(32)
+    api_password = secrets.token_urlsafe(32)
+    migration_url = database.url.set(username=MIGRATOR_ROLE, password=migrator_password)
+    api_url = database.url.set(username=API_ROLE, password=api_password)
+    environment = {
+        **database.environ,
+        "PHYSIOTRACK_MIGRATOR_BOOTSTRAP_DATABASE_URL": database.admin_url.render_as_string(
+            hide_password=False
+        ),
+        "PHYSIOTRACK_MIGRATOR_DATABASE_URL": migration_url.render_as_string(
+            hide_password=False
+        ),
+        "PHYSIOTRACK_MIGRATOR_PASSWORD": migrator_password,
+        "PHYSIOTRACK_API_PASSWORD": api_password,
+    }
+    api_engine = sa.create_engine(
+        api_url, poolclass=sa.pool.NullPool, hide_parameters=True
+    )
+    admin_engine = sa.create_engine(
+        database.admin_url, poolclass=sa.pool.NullPool, hide_parameters=True
+    )
+    try:
+        result = run_cli(database, "up", "--revision", INITIAL, environ=environment)
+        assert result.returncode == 0, result.stderr
+        identifier = uuid4()
+        with api_engine.begin() as connection:
+            connection.execute(
+                sa.text(
+                    "INSERT INTO public.measurements (id, type, date_of_measure, bpm) "
+                    "VALUES (:id, 'heart_rate', '2026-01-01', 72)"
+                ),
+                {"id": identifier},
+            )
+            connection.execute(
+                sa.text("UPDATE public.measurements SET bpm = 75 WHERE id = :id"),
+                {"id": identifier},
+            )
+            assert (
+                connection.scalar(
+                    sa.text("SELECT bpm FROM public.measurements WHERE id = :id"),
+                    {"id": identifier},
+                )
+                == 75
+            )
+
+        with admin_engine.begin() as connection:
+            connection.execute(sa.text("GRANT pg_read_all_data TO physiotrack_api"))
+            connection.execute(sa.text("GRANT physiotrack_api TO migrator"))
+        for _ in range(2):
+            result = run_cli(database, "up", environ=environment)
+            assert result.returncode == 0, result.stderr
+
+        with admin_engine.connect() as connection:
+            assert connection.execute(
+                sa.text(
+                    "SELECT rolsuper, rolcreatedb, rolcreaterole, rolinherit, rolreplication, rolbypassrls "
+                    "FROM pg_roles WHERE rolname = :role"
+                ),
+                {"role": API_ROLE},
+            ).one() == (False, False, False, False, False, False)
+            assert not connection.scalar(
+                sa.text(
+                    "SELECT EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles r "
+                    "ON r.oid IN (m.roleid, m.member) WHERE r.rolname = :role)"
+                ),
+                {"role": API_ROLE},
+            )
+            assert not connection.scalar(
+                sa.text("SELECT has_schema_privilege(:role, 'public', 'CREATE')"),
+                {"role": API_ROLE},
+            )
+            assert not connection.scalar(
+                sa.text(
+                    "SELECT has_database_privilege(:role, current_database(), 'TEMP')"
+                ),
+                {"role": API_ROLE},
+            )
+
+        with api_engine.begin() as connection:
+            assert (
+                connection.scalar(
+                    sa.text(
+                        "SELECT bpm FROM public.heart_rate_measurements WHERE id = :id"
+                    ),
+                    {"id": identifier},
+                )
+                == 75
+            )
+            connection.execute(
+                sa.text(
+                    "UPDATE public.heart_rate_measurements SET bpm = 80 WHERE id = :id"
+                ),
+                {"id": identifier},
+            )
+            connection.execute(
+                sa.text("DELETE FROM public.heart_rate_measurements WHERE id = :id"),
+                {"id": identifier},
+            )
+
+        for statement in (
+            "CREATE TABLE public.forbidden (id integer)",
+            "CREATE TEMP TABLE forbidden (id integer)",
+            "CREATE SCHEMA forbidden",
+            "CREATE FUNCTION public.forbidden() RETURNS int LANGUAGE sql AS 'SELECT 1'",
+            "ALTER TABLE public.heart_rate_measurements ADD COLUMN forbidden integer",
+            "DROP TABLE public.heart_rate_measurements",
+            "SELECT * FROM public.alembic_version",
+            "SET ROLE physiotrack_migrator",
+            "SET ROLE postgres",
+            "CREATE ROLE forbidden",
+            "ALTER ROLE physiotrack_api SUPERUSER",
+            "GRANT physiotrack_migrator TO physiotrack_api",
+        ):
+            with pytest.raises(sa.exc.DBAPIError), api_engine.begin() as connection:
+                connection.execute(sa.text(statement))
+    finally:
+        api_engine.dispose()
+        admin_engine.dispose()
 
 
 def test_provision_refuses_to_reassign_objects_owned_by_another_role(database):

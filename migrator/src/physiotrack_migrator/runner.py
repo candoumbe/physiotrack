@@ -17,6 +17,7 @@ from sqlalchemy import Connection, create_engine, text
 from sqlalchemy.pool import NullPool
 
 from physiotrack_migrator.config import (
+    API_ROLE,
     MIGRATOR_ROLE,
     ProvisioningSettings,
     Settings,
@@ -202,7 +203,126 @@ def _execute_composed(connection: Connection, statement: sql.Composable) -> None
     connection.exec_driver_sql(statement.as_string(driver_connection))
 
 
+def _provision_api_role(connection: Connection, settings: ProvisioningSettings) -> None:
+    role_exists = connection.scalar(
+        text("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :role)"),
+        {"role": API_ROLE},
+    )
+    if role_exists:
+        owns_objects = connection.scalar(
+            text(
+                "SELECT EXISTS (SELECT 1 FROM pg_shdepend d "
+                "JOIN pg_roles r ON r.oid = d.refobjid "
+                "WHERE d.refclassid = 'pg_authid'::regclass "
+                "AND d.deptype = 'o' AND r.rolname = :role)"
+            ),
+            {"role": API_ROLE},
+        )
+        if owns_objects:
+            raise ProvisioningError()
+        memberships = connection.execute(
+            text(
+                "SELECT granted.rolname, member.rolname FROM pg_auth_members m "
+                "JOIN pg_roles granted ON granted.oid = m.roleid "
+                "JOIN pg_roles member ON member.oid = m.member "
+                "WHERE granted.rolname = :role OR member.rolname = :role"
+            ),
+            {"role": API_ROLE},
+        ).all()
+        for granted_role, member_role in memberships:
+            _execute_composed(
+                connection,
+                sql.SQL("REVOKE {} FROM {}").format(
+                    sql.Identifier(granted_role), sql.Identifier(member_role)
+                ),
+            )
+    _execute_composed(
+        connection,
+        sql.SQL(
+            "{} ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE "
+            "NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD {}"
+        ).format(
+            sql.SQL("ALTER") if role_exists else sql.SQL("CREATE"),
+            sql.Identifier(API_ROLE),
+            sql.Literal(_scram_verifier(settings.api_password)),
+        ),
+    )
+    _execute_composed(
+        connection,
+        sql.SQL("REVOKE ALL ON DATABASE {} FROM PUBLIC, {}").format(
+            sql.Identifier(settings.database_name), sql.Identifier(API_ROLE)
+        ),
+    )
+    _execute_composed(
+        connection,
+        sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(
+            sql.Identifier(settings.database_name), sql.Identifier(API_ROLE)
+        ),
+    )
+    _execute_composed(
+        connection,
+        sql.SQL("REVOKE ALL ON SCHEMA public FROM {}").format(sql.Identifier(API_ROLE)),
+    )
+    _execute_composed(
+        connection,
+        sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(API_ROLE)),
+    )
+    for kind in ("TABLES", "SEQUENCES", "FUNCTIONS"):
+        _execute_composed(
+            connection,
+            sql.SQL("REVOKE ALL ON ALL {} IN SCHEMA public FROM {}, PUBLIC").format(
+                sql.SQL(kind), sql.Identifier(API_ROLE)
+            ),
+        )
+    for table in sorted({"measurements", *MEASUREMENT_TABLES}):
+        exists = connection.scalar(
+            text("SELECT to_regclass(:name) IS NOT NULL"), {"name": f"public.{table}"}
+        )
+        if exists:
+            _execute_composed(
+                connection,
+                sql.SQL(
+                    "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.{} TO {}"
+                ).format(sql.Identifier(table), sql.Identifier(API_ROLE)),
+            )
+    _execute_composed(
+        connection, sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(MIGRATOR_ROLE))
+    )
+    for kind, privileges in (
+        ("TABLES", "SELECT, INSERT, UPDATE, DELETE"),
+        ("SEQUENCES", "USAGE, SELECT, UPDATE"),
+    ):
+        _execute_composed(
+            connection,
+            sql.SQL("ALTER DEFAULT PRIVILEGES REVOKE ALL ON {} FROM {}, PUBLIC").format(
+                sql.SQL(kind), sql.Identifier(API_ROLE)
+            ),
+        )
+        _execute_composed(
+            connection,
+            sql.SQL(
+                "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON {} FROM {}, PUBLIC"
+            ).format(sql.SQL(kind), sql.Identifier(API_ROLE)),
+        )
+        _execute_composed(
+            connection,
+            sql.SQL(
+                "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT {} ON {} TO {}"
+            ).format(sql.SQL(privileges), sql.SQL(kind), sql.Identifier(API_ROLE)),
+        )
+    connection.execute(
+        text("ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC")
+    )
+    connection.execute(text("RESET ROLE"))
+
+
 def provision(settings: ProvisioningSettings) -> None:
+    if settings.api_password is not None and (
+        len(settings.api_password) < 32
+        or settings.api_password
+        in {settings.migrator_password, settings.bootstrap_url.password}
+    ):
+        raise ProvisioningError()
     engine = create_engine(
         settings.bootstrap_url,
         poolclass=NullPool,
@@ -217,7 +337,10 @@ def provision(settings: ProvisioningSettings) -> None:
             actual_name, current_user = connection.execute(
                 text("SELECT current_database(), current_user")
             ).one()
-            if actual_name != settings.database_name or current_user == MIGRATOR_ROLE:
+            if actual_name != settings.database_name or current_user in {
+                MIGRATOR_ROLE,
+                API_ROLE,
+            }:
                 raise ProvisioningError()
 
             schema_owner = connection.scalar(
@@ -240,6 +363,19 @@ def provision(settings: ProvisioningSettings) -> None:
             )
             if has_foreign_owner:
                 raise ProvisioningError()
+            if settings.api_password:
+                unsafe_objects = connection.scalar(
+                    text(
+                        "SELECT EXISTS (SELECT 1 FROM pg_namespace "
+                        "WHERE nspname NOT IN ('public', 'information_schema') "
+                        "AND left(nspname, 3) <> 'pg_') OR EXISTS ("
+                        "SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+                        "WHERE n.nspname = 'public') OR EXISTS ("
+                        "SELECT 1 FROM pg_extension WHERE extname <> 'plpgsql')"
+                    )
+                )
+                if unsafe_objects:
+                    raise ProvisioningError()
 
             role_exists = connection.scalar(
                 text("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :role)"),
@@ -292,12 +428,15 @@ def provision(settings: ProvisioningSettings) -> None:
                     sql.Identifier(MIGRATOR_ROLE)
                 ),
             )
+            connection.execute(text("REVOKE CREATE ON SCHEMA public FROM PUBLIC"))
             _execute_composed(
                 connection,
                 sql.SQL("GRANT USAGE, CREATE ON SCHEMA public TO {}").format(
                     sql.Identifier(MIGRATOR_ROLE)
                 ),
             )
+            if settings.api_password:
+                _provision_api_role(connection, settings)
     except ProvisioningError:
         raise
     except Exception as error:
@@ -338,6 +477,19 @@ def migrate(settings: Settings, action: str, revision: str | None = None) -> str
                         "COMMENT ON TABLE public.alembic_version IS 'physiotrack-migrator'"
                     )
                 )
+                if connection.scalar(
+                    text(
+                        "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :role)"
+                    ),
+                    {"role": API_ROLE},
+                ):
+                    _execute_composed(
+                        connection,
+                        sql.SQL(
+                            "REVOKE ALL ON TABLE public.alembic_version FROM {}, PUBLIC"
+                        ).format(sql.Identifier(API_ROLE)),
+                    )
+                checked_target(connection, settings, known_revisions)
             revisions = MigrationContext.configure(
                 connection, opts={"version_table_schema": "public"}
             ).get_current_heads()
