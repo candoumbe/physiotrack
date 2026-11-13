@@ -1,4 +1,3 @@
-.DEFAULT_GOAL := help
 
 ifneq ($(filter migrate-create,$(MAKECMDGOALS)),)
 override NAME := $(value NAME)
@@ -45,7 +44,7 @@ HOTFIX_BASE_BRANCH ?= main
 install: api-install migrator-install ## Install API development and standalone migrator dependencies (alias: sync)
 
 api-install: ## Install API dependencies in the root environment
-	uv sync
+	uv sync --all-packages
 
 migrator-install: ## Install standalone migrator dependencies
 	uv sync --project migrator --frozen

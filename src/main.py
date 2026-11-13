@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from features.health.router import router as health_router
 from features.measurements.router import router as measurements_router
 from physiotrack.problem_details import register_problem_details_handlers
+from telemetry import setup_telemetry
 
 
 def create_app() -> FastAPI:
@@ -15,6 +16,7 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+setup_telemetry(app)
 
 if __name__ == "__main__":
     import os

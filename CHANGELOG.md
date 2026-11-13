@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API, and sanitized internal server errors
 - Added subject-scoped measurement endpoints: `POST /subjects/{subject_id}/measurements` creates a measurement and `GET /subjects/{subject_id}/measurements` lists measurements for a subject
 - Added measurement list filtering by `type`, offset-based pagination with `limit` and `offset`, and `next`/`previous` pagination links
+- feat(telemetry): added OpenTelemetry support for API instrumentation — tracing, metrics
+  and log correlation via FastAPI auto-instrumentation, configured entirely through
+  standard `OTEL_*` environment variables (Aspire-injected, no hardcoded endpoint)
 
 ### 📝 Documentation
 
