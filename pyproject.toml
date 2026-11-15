@@ -19,6 +19,9 @@ dependencies = [
 [tool.uv]
 package = false
 
+[tool.uv.sources]
+physiotrack-migrator = { path = "migrator", editable = true }
+
 [tool.pytest.ini_options]
 testpaths = ["test"]
 
@@ -26,6 +29,7 @@ testpaths = ["test"]
 dev = [
     "alembic>=1.18,<2",
     "httpx",
+    "physiotrack-migrator",
     "pytest",
     "ruff>=0.16.7",
 ]

@@ -98,17 +98,17 @@ database, ownership or migration failures. `status` never creates schema objects
 From the Physiotrack repository root, use the existing Makefile targets:
 
 ```bash
-uv sync --project migrator --frozen
+make install
 make migrate-up
 make migrate-status
 make migrate-down
 make migrate-down REVISION=base
 ```
 
-From the MedEasy root, use `make -C physiotrack <target>`. The Makefile passes
-environment settings through to the existing CLI; use `uv sync --project
-migrator --frozen --no-dev` for runtime dependencies only. The committed lockfile
-fixes runtime and test dependency versions.
+From the MedEasy root, use `make -C physiotrack <target>`. The Makefile uses the
+Physiotrack environment and passes environment settings through to the CLI.
+For a separate runtime-only migrator environment, use `uv sync --project
+migrator --frozen --no-dev`. The committed lockfiles fix dependency versions.
 
 `migrate-up` invokes the existing `up` command (default revision `head`). If the
 bootstrap URI is configured, it validates that both URLs identify the same
@@ -141,8 +141,8 @@ make migrate-delete
 Equivalent standalone CLI commands:
 
 ```bash
-uv run --project migrator --frozen physiotrack-migrator create --message "add patient's measurements"
-uv run --project migrator --frozen physiotrack-migrator delete
+uv run physiotrack-migrator create --message "add patient's measurements"
+uv run physiotrack-migrator delete
 ```
 
 `create` (`-m`/`--message`) requires a nonblank message, preserved as supplied;
@@ -261,13 +261,13 @@ excludes virtual environments, secrets and tests.
 
 ## Validation
 
-From this directory:
+From the API root (`physiotrack`), use its environment for the migrator tests.
+It supplies FastAPI and Pydantic for the API schema imports:
 
 ```bash
-uv sync --frozen
-uv run --frozen pytest
-uv run --frozen ruff check .
-uv run --frozen ruff format --check .
+make install
+make migrator-test
+make migrator-lint
 ```
 
 The full suite requires Docker on Linux (host networking for the image smoke
@@ -288,7 +288,7 @@ connection timeout and synthetic secret sentinels verify bounded, redacted CLI
 errors. The separate image test proves non-editable packaging works without the
 API source or API dependencies.
 
-For tests without Docker: `uv run --frozen pytest -m 'not integration'`.
+For tests without Docker: `uv run pytest -c migrator/pyproject.toml migrator/tests -m 'not integration'`.
 From the API root its existing suite remains `uv run --frozen pytest` (or
 `make test`); pytest discovery is restricted to `test/` so it does not accidentally
 load this project's independent tests or dependencies.
