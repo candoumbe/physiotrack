@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 
-from features.health.router import router as health_router
-from features.measurements.router import router as measurements_router
+from features.health import router as health_router
+from features.measurements import router as measurements_router
 from physiotrack.problem_details import register_problem_details_handlers
 from telemetry import setup_telemetry
 

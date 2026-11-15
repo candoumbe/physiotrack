@@ -41,13 +41,12 @@ CHANNEL ?= $(shell \
 BASE_BRANCH ?= develop
 HOTFIX_BASE_BRANCH ?= main
 
-install: api-install migrator-install ## Install API development and standalone migrator dependencies (alias: sync)
+install: api-install migrator-install ## Install API and migrator development dependencies (alias: sync)
 
 api-install: ## Install API dependencies in the root environment
 	uv sync --all-packages
 
-migrator-install: ## Install standalone migrator dependencies
-	uv sync --project migrator --frozen
+migrator-install: api-install ## Install migrator dependencies in the root environment
 
 sync: install ## Alias for install
 
@@ -55,37 +54,37 @@ run: ## Run the API with auto-reload
 	uv run uvicorn main:app --reload --app-dir src
 
 migrate-up: ## Apply schema migrations (default: head; optional REVISION=...)
-	uv run --project migrator --frozen physiotrack-migrator up$(if $(strip $(REVISION)), --revision "$(REVISION)")
+	uv run physiotrack-migrator up$(if $(strip $(REVISION)), --revision "$(REVISION)")
 
 migrate-down: ## Destructive schema rollback (default: base; optional REVISION=...)
-	uv run --project migrator --frozen physiotrack-migrator down$(if $(strip $(REVISION)), --revision "$(REVISION)")
+	uv run physiotrack-migrator down$(if $(strip $(REVISION)), --revision "$(REVISION)")
 
 migrate-status: ## Show the current schema revision without changing it
-	uv run --project migrator --frozen physiotrack-migrator status
+	uv run physiotrack-migrator status
 
 migrate-create: private override export PHYSIOTRACK_MIGRATION_MESSAGE := $(value NAME)
 migrate-create: ## Create an empty local migration (required NAME='migration message'; no database)
-	uv run --project migrator --frozen physiotrack-migrator create --message="$$PHYSIOTRACK_MIGRATION_MESSAGE"
+	uv run physiotrack-migrator create --message="$$PHYSIOTRACK_MIGRATION_MESSAGE"
 
 migrate-delete: ## Delete the local unapplied head file only (not a database rollback)
-	uv run --project migrator --frozen physiotrack-migrator delete
+	uv run physiotrack-migrator delete
 
 test: api-test migrator-test ## Run API and migrator tests
 
 api-test: ## Run API tests
 	uv run pytest -c pyproject.toml test
 
-migrator-test: ## Run standalone migrator tests
-	uv run --project migrator --frozen pytest -c migrator/pyproject.toml migrator/tests
+migrator-test: ## Run migrator tests in the root environment
+	uv run pytest -c migrator/pyproject.toml migrator/tests
 
 lint: api-lint migrator-lint ## Check API and migrator code style
 
 api-lint: ## Lint API sources and tests with Ruff
 	uv run ruff check src test
 
-migrator-lint: ## Lint and check formatting for the standalone migrator
-	uv run --project migrator --frozen ruff check migrator
-	uv run --project migrator --frozen ruff format --check migrator
+migrator-lint: ## Lint and check formatting for the migrator
+	uv run ruff check migrator
+	uv run ruff format --check migrator
 
 format: ## Format code with ruff
 	uv run ruff format .
