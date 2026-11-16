@@ -18,6 +18,11 @@ class Measurement(Base):
     date_of_measure: Mapped[datetime] = mapped_column(
         MeasurementDateTime, sort_order=-1
     )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=False,
+        server_default=sa.text("clock_timestamp()"),
+    )
 
     @declared_attr.directive
     def __table_args__(cls):

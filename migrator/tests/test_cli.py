@@ -51,8 +51,8 @@ def test_create_delete_round_trip_without_database(source_checkout, capsys):
     assert cli.main(["create", "--message", message]) == 0
     scripts = ScriptDirectory(str(source_checkout))
     head = scripts.get_revision(scripts.get_current_head())
-    assert head.revision != "0002_dedicated_measurements"
-    assert head.down_revision == "0002_dedicated_measurements"
+    assert head.revision != "0003_measurement_creation_order"
+    assert head.down_revision == "0003_measurement_creation_order"
     assert head.doc == message
     assert head.module.upgrade() is None
     assert head.module.downgrade() is None
@@ -96,7 +96,7 @@ def test_up_dispatches_internal_provisioning_without_printing_secrets(
                     revision,
                 )
             )
-            or "0002_dedicated_measurements"
+            or "0003_measurement_creation_order"
         ),
     )
     monkeypatch.setattr(
@@ -106,7 +106,7 @@ def test_up_dispatches_internal_provisioning_without_printing_secrets(
     assert cli.main(["up"]) == 0
     output = capsys.readouterr()
     assert calls == [("physiotrack_migrator", "postgres", "head")]
-    assert output.out.strip() == "revision: 0002_dedicated_measurements"
+    assert output.out.strip() == "revision: 0003_measurement_creation_order"
     assert admin_password not in output.out + output.err
     assert migrator_password not in output.out + output.err
 
@@ -139,12 +139,12 @@ def test_runner_provisions_before_migrating_with_restricted_runtime_settings(
         "migrate",
         lambda value, action, revision: (
             calls.append(("migrate", value.runtime_url.username, action, revision))
-            or "0002_dedicated_measurements"
+            or "0003_measurement_creation_order"
         ),
     )
 
     assert runner.provision_and_migrate(settings, "head", provisioning) == (
-        "0002_dedicated_measurements"
+        "0003_measurement_creation_order"
     )
     assert calls == [
         ("provision", "postgres"),
@@ -170,7 +170,7 @@ def test_up_without_bootstrap_keeps_existing_runtime_migration_path(monkeypatch)
         "migrate",
         lambda settings, action, revision: (
             calls.append((settings.runtime_url.username, action, revision))
-            or "0002_dedicated_measurements"
+            or "0003_measurement_creation_order"
         ),
     )
 
@@ -255,10 +255,12 @@ def test_create_rejects_blank_message(source_checkout, message, capsys):
 
 
 def test_create_requires_message(source_checkout):
+    versions = source_checkout / "versions"
+    before = set(versions.glob("*.py"))
     with pytest.raises(SystemExit) as raised:
         cli.main(["create"])
     assert raised.value.code == 2
-    assert len(list((source_checkout / "versions").glob("*.py"))) == 2
+    assert set(versions.glob("*.py")) == before
 
 
 @pytest.mark.parametrize("action", ["create", "delete"])
@@ -273,7 +275,9 @@ def test_revision_editing_requires_source_checkout(
 
 
 def test_delete_protects_initial_revision(source_checkout, capsys):
-    assert cli.main(["delete"]) == 0
+    versions = source_checkout / "versions"
+    while len(list(versions.glob("*.py"))) > 1:
+        assert cli.main(["delete"]) == 0
     initial = source_checkout / "versions/0001_measurements.py"
     before = initial.read_bytes()
     assert cli.main(["delete"]) == 2
@@ -400,7 +404,7 @@ def test_make_create_delete_preserves_message(source_checkout, message, monkeypa
     scripts = ScriptDirectory(str(source_checkout))
     head = scripts.get_revision(scripts.get_current_head())
     assert head.module.__doc__ == message
-    assert head.down_revision == "0002_dedicated_measurements"
+    assert head.down_revision == "0003_measurement_creation_order"
     assert not (working / "shell-marker").exists()
     assert not (working / "make-marker").exists()
     result = subprocess.run(
@@ -427,6 +431,8 @@ def test_make_create_delete_preserves_message(source_checkout, message, monkeypa
 @pytest.mark.parametrize("name_argument", [[], ["NAME="], ["NAME=   "]])
 def test_make_create_requires_name(source_checkout, name_argument, monkeypatch):
     working = source_checkout.parents[3]
+    versions = source_checkout / "versions"
+    before = set(versions.glob("*.py"))
     copy2(Path(__file__).resolve().parents[2] / "Makefile", working / "Makefile")
     monkeypatch.setenv("PATH", f"{Path(sys.executable).parent}:{os.environ['PATH']}")
     monkeypatch.delenv("NAME", raising=False)
@@ -447,7 +453,7 @@ def test_make_create_requires_name(source_checkout, name_argument, monkeypatch):
     )
     assert result.returncode != 0
     assert "required" in result.stderr
-    assert len(list((source_checkout / "versions").glob("*.py"))) == 2
+    assert set(versions.glob("*.py")) == before
 
 
 def test_wheel_contains_working_template_and_refuses_source_editing(
@@ -490,7 +496,7 @@ config = runner.migration_config()
 command.revision(config, message='packaged template')
 scripts = ScriptDirectory.from_config(config)
 head = scripts.get_revision(scripts.get_current_head())
-assert head.down_revision == '0002_dedicated_measurements'
+assert head.down_revision == '0003_measurement_creation_order'
 assert head.module.__doc__ == 'packaged template'
 assert head.module.upgrade() is None
 assert head.module.downgrade() is None

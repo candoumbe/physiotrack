@@ -40,7 +40,7 @@ from physiotrack_migrator.runner import (
 )
 
 pytestmark = pytest.mark.integration
-HEAD = "0002_dedicated_measurements"
+HEAD = "0003_measurement_creation_order"
 INITIAL = "0001_measurements"
 TABLES = {
     "heart_rate_measurements",
