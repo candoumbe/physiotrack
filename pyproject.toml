@@ -13,6 +13,9 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.65b0",
     "opentelemetry-instrumentation-logging>=0.65b0",
     "opentelemetry-sdk>=1.44.0",
+    "physiotrack-migrator",
+    "psycopg[binary]>=3.3,<4",
+    "sqlalchemy>=2.0,<3",
     "uvicorn[standard]",
 ]
 
@@ -29,7 +32,6 @@ testpaths = ["test"]
 dev = [
     "alembic>=1.18,<2",
     "httpx",
-    "physiotrack-migrator",
     "pytest",
     "ruff>=0.16.7",
 ]

@@ -8,6 +8,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from physiotrack.database import DatabaseUnavailable
+
 PROBLEM_DETAILS_MEDIA_TYPE = "application/problem+json"
 
 logger = logging.getLogger(__name__)
@@ -53,6 +55,18 @@ def _response(
 
 
 def register_problem_details_handlers(app: FastAPI) -> None:
+    @app.exception_handler(DatabaseUnavailable)
+    async def database_unavailable_handler(
+        request: Request, exception: DatabaseUnavailable
+    ) -> JSONResponse:
+        return _response(
+            request,
+            status_code=503,
+            type_uri="urn:physiotrack:problem:database-unavailable",
+            title="Service Unavailable",
+            detail="Measurement storage is temporarily unavailable.",
+        )
+
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(
         request: Request, exception: StarletteHTTPException

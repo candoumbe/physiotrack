@@ -2,76 +2,158 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
-from features.measurements.schemas import Measurement
+from features.measurements.dependencies import get_measurement_service
+from features.measurements.schemas import Measurement, MeasurementType
+from features.measurements.schemas.measurement_list_response import (
+    MeasurementListResponse,
+)
+from features.measurements.schemas.measurement_registry import (
+    resolve_measurement_type,
+)
+from features.measurements.service import MeasurementService
 
 router = APIRouter(prefix="/subjects", tags=["measurements"])
 
-_store: dict[str, list[Measurement]] = {}
 
-
-def _ensure_subject(subject_id: str) -> list[Measurement]:
-    return _store.setdefault(subject_id, [])
-
-
-@router.post("/{subject_id}/measurements", status_code=status.HTTP_201_CREATED)
-def create_measurement(
-    subject_id: str, measurement: Measurement, response: Response
+def _create_measurement(
+    subject_id: str,
+    measurement: Measurement,
+    response: Response,
+    measurement_service: MeasurementService,
+    measurement_type: MeasurementType | None = None,
 ) -> Measurement:
-    """
-    Create a new measurement for the specified subject.
-
-    Args:
-        subject_id (str): The ID of the subject.
-        measurement (Measurement): The measurement data to create.
-
-    Returns:
-        Measurement: The created measurement with the subject ID included.
-    """
-
-    measurements = _ensure_subject(subject_id)
-    clone = measurement.model_copy(update={"subject_id": subject_id})
-    measurements.append(clone)
-
-    response.headers["Location"] = f"/subjects/{subject_id}/measurements/{clone.id}"
-    response.status_code = status.HTTP_201_CREATED
-
-    return clone
-
-
-@router.get("/{subject_id}/measurements/{measurement_id}")
-def get_measurement(subject_id: str, measurement_id: str) -> Measurement:
-    """
-    Retrieve a specific measurement for the specified subject.
-
-    Args:
-        subject_id (str): The ID of the subject.
-        measurement_id (str): The ID of the measurement to retrieve.
-
-    Returns:
-        Measurement: The requested measurement.
-
-    Raises:
-        HTTPException: If the measurement is not found.
-    """
-    measurements = _store.get(subject_id)
-    if measurements is None:
+    if measurement_type is not None and measurement.type != measurement_type:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Measurement not found"
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"Measurement type '{measurement.type.value}' does not match "
+                f"URL type '{measurement_type.value}'"
+            ),
         )
 
-    for m in measurements:
-        if m.id == measurement_id:
-            return m
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND, detail="Measurement not found"
+    created = measurement_service.create(subject_id, measurement)
+    response.headers["Location"] = f"/subjects/{subject_id}/measurements/{created.id}"
+    return created
+
+
+@router.post(
+    "/{subject_id}/measurements",
+    status_code=status.HTTP_201_CREATED,
+    response_model=Measurement,
+)
+def create_measurement(
+    subject_id: str,
+    measurement: Measurement,
+    response: Response,
+    measurement_service: Annotated[
+        MeasurementService, Depends(get_measurement_service)
+    ],
+) -> Measurement:
+    """Create a measurement for a subject using the legacy collection path."""
+    return _create_measurement(subject_id, measurement, response, measurement_service)
+
+
+@router.post(
+    "/{subject_id}/{measurement_type}",
+    status_code=status.HTTP_201_CREATED,
+    response_model=Measurement,
+)
+@router.post(
+    "/{subject_id}/measurements/{measurement_type}",
+    status_code=status.HTTP_201_CREATED,
+    response_model=Measurement,
+)
+def create_typed_measurement(
+    subject_id: str,
+    measurement_type: str,
+    measurement: Measurement,
+    response: Response,
+    measurement_service: Annotated[
+        MeasurementService, Depends(get_measurement_service)
+    ],
+) -> Measurement:
+    """Create a measurement whose type is stated in the URL."""
+    resolved_type = resolve_measurement_type(measurement_type)
+    if resolved_type is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Unsupported measurement type '{measurement_type}'",
+        )
+    return _create_measurement(
+        subject_id, measurement, response, measurement_service, resolved_type
     )
 
 
-@router.get("/{subject_id}/measurements")
+@router.get(
+    "/{subject_id}/measurements/{measurement_id}",
+    response_model=Measurement,
+)
+def get_measurement(
+    subject_id: str,
+    measurement_id: str,
+    measurement_service: Annotated[
+        MeasurementService, Depends(get_measurement_service)
+    ],
+) -> Measurement:
+    """Retrieve a subject's measurement by id."""
+    measurement = measurement_service.get(subject_id, measurement_id)
+    if measurement is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Measurement not found"
+        )
+    return measurement
+
+
+def _list_measurements(
+    subject_id: str,
+    path: str,
+    measurement_type: str | None,
+    limit: int | None,
+    offset: int,
+    measurement_service: MeasurementService,
+) -> MeasurementListResponse:
+    items, total, effective_limit = measurement_service.list(
+        subject_id, measurement_type, limit, offset
+    )
+
+    next_offset = offset + effective_limit
+    previous_offset = max(offset - effective_limit, 0)
+    query_params: list[str] = []
+    if measurement_type is not None:
+        query_params.append(f"type={measurement_type}")
+    query_params.append(f"limit={effective_limit}")
+
+    next_url = None
+    previous_url = None
+    if next_offset < total:
+        next_url = f"{path}?{'&'.join([*query_params, f'offset={next_offset}'])}"
+    if offset > 0:
+        previous_url = (
+            f"{path}?{'&'.join([*query_params, f'offset={previous_offset}'])}"
+        )
+
+    return MeasurementListResponse(
+        items=items,
+        pagination={
+            "total": total,
+            "limit": effective_limit,
+            "offset": offset,
+        },
+        links={"next": next_url, "previous": previous_url},
+    )
+
+
+@router.get(
+    "/{subject_id}/measurements",
+    response_model=MeasurementListResponse,
+)
 def list_measurements(
     subject_id: str,
+    measurement_service: Annotated[
+        MeasurementService, Depends(get_measurement_service)
+    ],
     type: Annotated[
         str | None, Query(description="Filter measurements by type")
     ] = None,
@@ -81,44 +163,48 @@ def list_measurements(
     offset: Annotated[
         int, Query(description="Number of measurements to skip", ge=0)
     ] = 0,
-) -> dict[str, object]:
-    measurements = _store.get(subject_id, [])
-    if type is not None:
-        measurements = [m for m in measurements if m.type.value == type]
+) -> MeasurementListResponse:
+    """List a subject's measurements using the legacy collection path."""
+    return _list_measurements(
+        subject_id,
+        f"/subjects/{subject_id}/measurements",
+        type,
+        limit,
+        offset,
+        measurement_service,
+    )
 
-    total = len(measurements)
-    effective_limit = total if limit is None else limit
-    paginated = measurements[offset : offset + effective_limit]
 
-    next_offset = offset + effective_limit
-    previous_offset = max(offset - effective_limit, 0)
+@router.get(
+    "/{subject_id}/{measurement_type}",
+    response_model=MeasurementListResponse,
+)
+def list_measurements_by_type(
+    subject_id: str,
+    measurement_type: str,
+    measurement_service: Annotated[
+        MeasurementService, Depends(get_measurement_service)
+    ],
+    limit: Annotated[
+        int | None, Query(description="Maximum number of measurements to return", ge=1)
+    ] = None,
+    offset: Annotated[
+        int, Query(description="Number of measurements to skip", ge=0)
+    ] = 0,
+) -> MeasurementListResponse:
+    """List measurements by canonical type or plural resource name."""
+    resolved_type = resolve_measurement_type(measurement_type)
+    if resolved_type is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Unsupported measurement type '{measurement_type}'",
+        )
 
-    params: list[str] = []
-    if type is not None:
-        params.append(f"type={type}")
-
-    params.extend([f"limit={effective_limit}", f"offset={next_offset}"])
-
-    next_url = None
-    previous_url = None
-
-    if next_offset < total:
-        next_query = "&".join([*params[:-1], f"offset={next_offset}"])
-        next_url = f"/subjects/{subject_id}/measurements?{next_query}"
-
-    if offset > 0:
-        previous_query = "&".join([*params[:-1], f"offset={previous_offset}"])
-        previous_url = f"/subjects/{subject_id}/measurements?{previous_query}"
-
-    return {
-        "items": paginated,
-        "pagination": {
-            "total": total,
-            "limit": effective_limit,
-            "offset": offset,
-        },
-        "links": {
-            "next": next_url,
-            "previous": previous_url,
-        },
-    }
+    return _list_measurements(
+        subject_id,
+        f"/subjects/{subject_id}/{measurement_type}",
+        resolved_type.value,
+        limit,
+        offset,
+        measurement_service,
+    )
