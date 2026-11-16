@@ -9,19 +9,35 @@ identifier.
 ### Implemented
 
 - `GET /health` — API health check, returns status and timestamp
+- Subject-scoped measurement creation, retrieval, filtering, and pagination
 
-### Designed, not yet implemented
+Measurement routes use resource names derived from the supported variants in
+`MeasurementType`: `heart_rates`, `sleeps`, `activities`, and
+`blood_pressures`. A new measurement variant registered in the schema union
+and `MeasurementType` is available through the generic typed routes without
+adding endpoint-specific branches. Canonical singular values such as
+`blood_pressure` remain valid aliases.
 
-The following describes the target architecture for physiological measurement
-recording. Only the Pydantic schemas exist today (`src/features/measurements/schemas/`);
-no router or endpoints have been implemented yet.
+```text
+POST /subjects/{subject_id}/measurements/{measurement_resource}
+GET  /subjects/{subject_id}/{measurement_resource}/
+GET  /subjects/{subject_id}/measurements/{measurement_id}
+GET  /subjects/{subject_id}/measurements?type={measurement_type}&limit={n}&offset={n}
+```
 
-- Subject-scoped measurements, with the subject identifier (`subject_id`) carried in the
-  URL path
-- System-generated measurement id
-- A discriminated-union schema supporting multiple measurement types: heart rate, sleep,
-  and activity
-- Generic `POST`/`GET` endpoints for recording and retrieving measurements
+The legacy `POST /subjects/{subject_id}/measurements` and collection `GET`
+remain available. Typed creation validates that the body discriminator matches
+the URL type. Unsupported types such as `heights` are rejected until their
+measurement schemas are implemented. Collection responses include `items`,
+`pagination` (`total`, `limit`, `offset`), and `links` (`next`, `previous`).
+Measurements are persisted in the dedicated PostgreSQL database through the
+existing migrator ORM models. API startup requires
+`PHYSIOTRACK_DATABASE_HOST`, `PHYSIOTRACK_DATABASE_PORT`,
+`PHYSIOTRACK_DATABASE_NAME`, `PHYSIOTRACK_DATABASE_USERNAME` (the
+`physiotrack_api` role), and `PHYSIOTRACK_DATABASE_PASSWORD`. The API does not
+load `.env` files, supply defaults, or run migrations; it fails startup if the
+required connection is unavailable. The MedEasy AppHost supplies these fields
+after its migrator completes.
 
 ## Tech stack
 
@@ -42,7 +58,7 @@ src/
   features/
     health/                   # GET /health
       router.py
-    measurements/              # Physiological measurement schemas (in progress)
+    measurements/              # Measurement API, service, and schemas
       schemas/                 # One class per module; public reexports in __init__.py
 ```
 
@@ -89,6 +105,10 @@ Run tests:
 make test
 ```
 
+Measurement API integration tests and migrator tests use disposable
+`postgres:17.6-bookworm` containers with generated test credentials; Docker is
+required. They do not use or inspect developer database configuration.
+
 Each target wraps the underlying `uv` commands (e.g. `make sync` runs `uv sync`
 and `uv sync --project migrator --frozen`, `make run` runs
 `uv run uvicorn main:app --reload --app-dir src`, `make test` runs `uv run pytest`).
@@ -100,11 +120,11 @@ See [CHANGELOG.md](CHANGELOG.md) for a detailed history of changes.
 
 ## Standalone schema migrations
 
-The independent [migrator](migrator/README.md) manages only the schema of a
+The standalone [migrator](migrator/README.md) manages only the schema of the
 dedicated PostgreSQL database. `make migrate-up` can provision its restricted
-migration role when the optional bootstrap URI is configured. The API remains
-**in-memory**; no database configuration is required to run it. Migrations do not
-start an API, create a database or enable business persistence.
+migration role and the API's restricted `physiotrack_api` role when the
+bootstrap settings are configured. Migrations do not start an API or create a
+database. The API uses the dedicated role and never runs migrations itself.
 
 ```bash
 uv sync --project migrator --frozen
@@ -127,9 +147,10 @@ make migrate-delete
 
 `migrate-create` requires a nonblank `NAME`, used intact as the Alembic migration
 message, not the revision identifier. It generates an empty revision with
-`upgrade`/`downgrade` placeholders, without autogeneration (the API has no ORM
-metadata). Both `migrate-create` and `migrate-delete` require a source checkout
-and **do not require database configuration or connect to a database**.
+`upgrade`/`downgrade` placeholders, without autogeneration; migration changes
+remain explicitly authored and reviewed. Both `migrate-create` and
+`migrate-delete` require a source checkout and **do not require database
+configuration or connect to a database**.
 
 `migrate-delete` removes only the unique head file of a linear local migration
 chain, never the initial revision. It refuses empty or ambiguous graphs and
@@ -152,6 +173,8 @@ For `migrate-up`, `migrate-down` and `migrate-status`, set
 `down` to base is destructive: it removes the four dedicated measurement tables
 and their data, never the database. Revision `0002_dedicated_measurements` safely
 splits existing measurements by type; rollback to `0001_measurements` merges
-them without loss when IDs remain globally unique. See the migrator guide for
-the safety checks and limitations. The migrator has its own dependencies, lockfile, tests and
-non-server Docker image.
+them without loss when IDs remain globally unique. Revision
+`0003_measurement_creation_order` adds server-generated creation timestamps for
+stable API collection ordering. See the migrator guide for the safety checks
+and limitations. The migrator has its own lockfile, tests and non-server Docker
+image; its ORM models are also used by the API persistence service.

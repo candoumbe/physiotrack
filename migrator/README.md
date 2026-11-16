@@ -1,9 +1,10 @@
 # Physiotrack schema migrator
 
-An independent Python >=3.14 executable for schema migrations only. It uses
+An independent Python >=3.14 executable for schema migrations. It uses
 Alembic, SQLAlchemy ORM and Psycopg 3. It does not import, install or start
-FastAPI or `src/main.py`. The API still stores measurements **in memory**;
-running this project does not enable API persistence or transfer any data.
+FastAPI or `src/main.py`. The API imports the ORM measurement models from this
+package and uses its dedicated PostgreSQL role for persistence; the migrator
+and API remain separate processes with separate credentials.
 
 ## Dedicated database prerequisite
 
@@ -18,8 +19,8 @@ migrator image from this checkout. Its one-shot container provisions the roles
 and runs `up` as `physiotrack_migrator`. Aspire generates separate persisted
 bootstrap, migrator and `physiotrack_api` passwords. Only the migrator container
 receives bootstrap and migration credentials. The API receives only its own
-database fields and waits for migration to finish; it currently ignores those
-fields and remains in-memory. This configuration does not enable persistence.
+database fields and waits for migration to finish before connecting with its
+restricted role.
 
 Provisioning is repeatable and also runs against an already-initialized
 PostgreSQL volume. It does not create databases or reassign existing objects.
@@ -186,12 +187,19 @@ variant-specific columns. Checks allow exactly one of:
 All columns belonging to other variants must be null. Missing optional columns
 remain null in this historical schema.
 
-Revision `0002_dedicated_measurements` (the current head) replaces that table with
+Revision `0002_dedicated_measurements` replaces that table with
 four independent tables in `public`: `heart_rate_measurements`,
 `sleep_measurements`, `activity_measurements` and `blood_pressure_measurements`.
 Each owns `id`, `subject_id`, `date_of_measure` and only its variant-specific
 columns from the table above. Required fields are `NOT NULL`; optional fields
 remain nullable. The `type` discriminator is no longer stored.
+
+Revision `0003_measurement_creation_order` adds a server-generated
+`created_at` timestamp to each dedicated table. The API orders collection
+results by this timestamp and the UUID as a stable tie-breaker, preserving
+creation order across table variants and API restarts. Rows already present
+when this revision is applied receive a migration-time value because earlier
+schema revisions did not record creation order. The `type` discriminator is no longer stored.
 
 The new revision locks source tables against concurrent writes, copies values
 without reserializing dates or converting numbers, and compares every old field
@@ -225,18 +233,20 @@ SQL validation belong to a future persistence design, not this migrator.
 
 `physiotrack_migrator.models` exposes `Base`, the abstract Python `Measurement`,
 and `HeartRateMeasurement`, `SleepMeasurement`, `ActivityMeasurement` and
-`BloodPressureMeasurement`. Each concrete class maps its own dedicated table.
+`BloodPressureMeasurement`. Each concrete class maps its own dedicated table
+and is used by the API persistence service.
 `Measurement` only shares Python field and constraint declarations; it has no
 table or mapper and cannot be selected. Query the concrete class, for example
 `select(HeartRateMeasurement)`. Reconstruct the API discriminator from the chosen
 variant when serializing to the unchanged Pydantic contract.
 
-All variants share `id`, `subject_id` and `date_of_measure` (the ORM name for the
-API's `dateOfMeasure`). ORM writes default `id` to a new UUID4 and blood pressure
-`unit` to `mmHg`; these are client-side defaults, not new database defaults.
+All variants share `id`, `subject_id`, `date_of_measure` (the ORM name for the
+API's `dateOfMeasure`) and `created_at`. ORM writes default `id` to a new UUID4
+and blood pressure `unit` to `mmHg`; these are client-side defaults, not new
+database defaults.
 Integer fields load as Python `int`, and dates bind/load as `datetime` using the
-existing lossless `NUMERIC` and ISO-8601 `TEXT` storage. These models match revision
-`0002_dedicated_measurements`; they do not connect the API to the database.
+existing lossless `NUMERIC` and ISO-8601 `TEXT` storage. These models match
+revision `0003_measurement_creation_order`.
 
 ## Separate container
 
