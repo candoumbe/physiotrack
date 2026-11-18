@@ -46,24 +46,6 @@ def _create_measurement(
     )
     return created
 
-
-@router.post(
-    "/{subject_id}/measurements",
-    status_code=status.HTTP_201_CREATED,
-    response_model=Measurement,
-)
-def create_measurement(
-    subject_id: UUID,
-    measurement: Measurement,
-    response: Response,
-    measurement_service: Annotated[
-        MeasurementService, Depends(get_measurement_service)
-    ],
-) -> Measurement:
-    """Create a measurement for a subject using the legacy collection path."""
-    return _create_measurement(subject_id, measurement, response, measurement_service)
-
-
 def _list_measurements(
     subject_id: UUID,
     path: str,
@@ -131,39 +113,6 @@ def _list_measurements(
             "first": first_link,
             "last": last_link,
         },
-    )
-
-
-@router.get(
-    "/{subject_id}/measurements",
-    response_model=MeasurementListResponse[Measurement],
-)
-def list_measurements(
-    subject_id: UUID,
-    measurement_service: Annotated[
-        MeasurementService, Depends(get_measurement_service)
-    ],
-    response: Response,
-    type: Annotated[
-        str | None, Query(description="Filter measurements by type")
-    ] = None,
-    limit: Annotated[
-        int | None,
-        Query(ge=1, description="Maximum number of measurements to return"),
-    ] = None,
-    offset: Annotated[
-        int, Query(ge=0, description="Number of measurements to skip")
-    ] = 0,
-) -> MeasurementListResponse[Measurement]:
-    """List a subject's measurements using the legacy collection path."""
-    return _list_measurements(
-        subject_id,
-        f"/subjects/{subject_id}/measurements",
-        type,
-        limit,
-        offset,
-        measurement_service,
-        response,
     )
 
 
@@ -282,13 +231,13 @@ for measurement_type, model in MEASUREMENT_MODELS.items():
         router.add_api_route(
             f"/{{subject_id}}/{resource_name}",
             _typed_list_endpoint(measurement_type, resource_name, model),
-            methods=["GET"],
+            methods=["GET", "HEAD"],
             response_model=MeasurementListResponse[model],
         )
         router.add_api_route(
             f"/{{subject_id}}/{resource_name}/{{measure_id}}",
             _typed_detail_endpoint(measurement_type, model),
-            methods=["GET"],
+            methods=["GET", "HEAD"],
             response_model=model,
         )
         router.add_api_route(
@@ -305,16 +254,11 @@ for measurement_type, model in MEASUREMENT_MODELS.items():
     include_in_schema=False,
     status_code=status.HTTP_201_CREATED,
 )
-@router.post(
-    "/{subject_id}/measurements/{measurement_type}",
-    include_in_schema=False,
-    status_code=status.HTTP_201_CREATED,
-)
 def reject_unsupported_measurement_type(
     subject_id: str, measurement_type: str, measurement: Measurement
 ) -> None:
     raise HTTPException(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         detail=f"Unsupported measurement type '{measurement_type}'",
     )
 
@@ -322,6 +266,6 @@ def reject_unsupported_measurement_type(
 @router.get("/{subject_id}/{measurement_type}", include_in_schema=False)
 def reject_unsupported_measurement_list(subject_id: str, measurement_type: str) -> None:
     raise HTTPException(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         detail=f"Unsupported measurement type '{measurement_type}'",
     )

@@ -144,19 +144,18 @@ def test_concrete_measurement_schemas_omit_and_reject_type(model_class, values):
         model_class.model_validate({**values, "type": "heart_rate"})
 
 
-def test_create_and_list_measurements_for_subject(client):
+def test_create_and_list_typed_measurements_for_subject(client):
     subject_id = SUBJECT_UUID
     payload = {
-        "type": "heart_rate",
         "bpm": 72,
         "dateOfMeasure": "2026-09-13T12:00:00Z",
     }
 
-    response = client.post(f"/subjects/{subject_id}/measurements", json=payload)
+    response = client.post(f"/subjects/{subject_id}/heart_rates", json=payload)
 
     assert response.status_code == 201, response.text
     body = response.json()
-    assert body["type"] == "heart_rate"
+    assert "type" not in body
     assert body["subject_id"] == subject_id
     assert body["bpm"] == 72
     assert "id" in body
@@ -164,71 +163,76 @@ def test_create_and_list_measurements_for_subject(client):
         "+00:00"
     )
 
-    list_response = client.get(f"/subjects/{subject_id}/measurements")
+    list_response = client.get(f"/subjects/{subject_id}/heart_rates")
     assert list_response.status_code == 200, list_response.text
     payload = list_response.json()
     items = payload["items"]
     assert len(items) == 1
     assert items[0]["id"] == body["id"]
+    assert "type" not in items[0]
     assert set(payload) == {"items", "links", "total"}
     assert payload["total"] == 1
-    assert payload["links"]["first"]["href"].endswith("limit=50&offset=0")
-    assert payload["links"]["last"]["href"].endswith("limit=50&offset=0")
+    assert payload["links"]["first"]["href"].endswith(
+        "/heart_rates?type=heart_rate&limit=50&offset=0"
+    )
+    assert payload["links"]["last"]["href"].endswith(
+        "/heart_rates?type=heart_rate&limit=50&offset=0"
+    )
     assert list_response.headers["x-count"] == "1"
     assert list_response.headers["x-total-count"] == "1"
 
 
-def test_list_measurements_can_be_filtered_by_type(client):
+def test_typed_measurement_collections_only_return_their_type(client):
     subject_id = "5b0e7c52-0d1a-4c55-9a43-8f5f0f1d2a01"
     client.post(
-        f"/subjects/{subject_id}/measurements",
+        f"/subjects/{subject_id}/sleeps",
         json={
-            "type": "sleep",
             "duration_minutes": 420,
             "quality_score": 0.8,
             "dateOfMeasure": "2026-09-13T08:00:00Z",
         },
     )
     client.post(
-        f"/subjects/{subject_id}/measurements",
+        f"/subjects/{subject_id}/activities",
         json={
-            "type": "activity",
             "steps": 12345,
             "calories": 320.5,
             "dateOfMeasure": "2026-09-13T18:30:00Z",
         },
     )
 
-    sleep_response = client.get(f"/subjects/{subject_id}/measurements?type=sleep")
+    sleep_response = client.get(f"/subjects/{subject_id}/sleeps")
     assert sleep_response.status_code == 200, sleep_response.text
     sleep_items = sleep_response.json()["items"]
     assert len(sleep_items) == 1
-    assert sleep_items[0]["type"] == "sleep"
+    assert sleep_items[0]["duration_minutes"] == 420
+    assert "type" not in sleep_items[0]
 
-    activity_response = client.get(f"/subjects/{subject_id}/measurements?type=activity")
+    activity_response = client.get(f"/subjects/{subject_id}/activities")
     assert activity_response.status_code == 200, activity_response.text
     activity_items = activity_response.json()["items"]
     assert len(activity_items) == 1
-    assert activity_items[0]["type"] == "activity"
+    assert activity_items[0]["steps"] == 12345
+    assert "type" not in activity_items[0]
 
 
 def test_list_measurements_supports_pagination(client):
     subject_id = "5b0e7c52-0d1a-4c55-9a43-8f5f0f1d2a02"
     for idx in range(5):
         client.post(
-            f"/subjects/{subject_id}/measurements",
+            f"/subjects/{subject_id}/heart_rates",
             json={
-                "type": "heart_rate",
                 "bpm": 70 + idx,
                 "dateOfMeasure": f"2026-09-13T12:{idx:02d}:00Z",
             },
         )
 
-    response = client.get(f"/subjects/{subject_id}/measurements?limit=2&offset=1")
+    response = client.get(f"/subjects/{subject_id}/heart_rates?limit=2&offset=1")
     assert response.status_code == 206, response.text
     body = response.json()
     assert len(body["items"]) == 2
     assert [item["bpm"] for item in body["items"]] == [71, 72]
+    assert all("type" not in item for item in body["items"])
     assert body["total"] == 5
     assert set(body) == {"items", "links", "total"}
     assert body["links"]["next"]["rel"] == "next"
@@ -263,7 +267,7 @@ def test_list_measurements_supports_pagination(client):
 def test_measurement_pagination_rejects_invalid_values_with_unprocessable_entity(
     client, query
 ):
-    response = client.get(f"/subjects/{SUBJECT_UUID}/measurements?{query}")
+    response = client.get(f"/subjects/{SUBJECT_UUID}/heart_rates?{query}")
 
     assert response.status_code == 422
 
@@ -276,9 +280,8 @@ def test_measurement_limit_defaults_to_50_and_caps_at_configured_maximum(
     with TestClient(create_app()) as client:
         for idx in range(3):
             response = client.post(
-                f"/subjects/{subject_id}/measurements",
+                f"/subjects/{subject_id}/heart_rates",
                 json={
-                    "type": "heart_rate",
                     "bpm": 70 + idx,
                     "dateOfMeasure": f"2026-09-13T12:0{idx}:00Z",
                 },
@@ -286,8 +289,8 @@ def test_measurement_limit_defaults_to_50_and_caps_at_configured_maximum(
             assert response.status_code == 201, response.text
 
     with TestClient(create_app()) as client:
-        default_response = client.get(f"/subjects/{subject_id}/measurements")
-        capped_response = client.get(f"/subjects/{subject_id}/measurements?limit=10")
+        default_response = client.get(f"/subjects/{subject_id}/heart_rates")
+        capped_response = client.get(f"/subjects/{subject_id}/heart_rates?limit=10")
 
     assert default_response.status_code == 206
     assert "limit=2&offset=0" in default_response.json()["links"]["first"]["href"]
@@ -397,6 +400,28 @@ def test_typed_measurement_creation_keeps_measurements_path_compatible(client):
     assert "type" not in create_response.json()
 
 
+def test_typed_measurement_collection_and_detail_support_head(client):
+    subject_id = "5b0e7c52-0d1a-4c55-9a43-8f5f0f1d2a11"
+    create_response = client.post(
+        f"/subjects/{subject_id}/heart_rates",
+        json={"bpm": 72, "dateOfMeasure": "2026-09-13T12:00:00Z"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    measurement_id = create_response.json()["id"]
+
+    collection_response = client.head(f"/subjects/{subject_id}/heart_rates")
+    detail_response = client.head(
+        f"/subjects/{subject_id}/heart_rates/{measurement_id}"
+    )
+
+    assert collection_response.status_code == 200, collection_response.text
+    assert collection_response.content == b""
+    assert collection_response.headers["x-count"] == "1"
+    assert collection_response.headers["x-total-count"] == "1"
+    assert detail_response.status_code == 200, detail_response.text
+    assert detail_response.content == b""
+
+
 def test_typed_measurement_routes_reject_a_body_discriminator(client):
     response = client.post(
         f"/subjects/{SUBJECT_UUID}/heart_rates",
@@ -410,7 +435,7 @@ def test_typed_measurement_routes_reject_a_body_discriminator(client):
     assert response.status_code == 422
 
 
-def test_openapi_distinguishes_typed_and_generic_measurement_contracts(client):
+def test_openapi_exposes_typed_measurement_contracts_only(client):
     openapi = client.get("/openapi.json").json()
     paths = openapi["paths"]
     schemas_by_name = openapi["components"]["schemas"]
@@ -432,23 +457,7 @@ def test_openapi_distinguishes_typed_and_generic_measurement_contracts(client):
     item_schema_name = item_schema_ref.rsplit("/", 1)[-1]
     assert "type" not in schemas_by_name[item_schema_name]["properties"]
 
-    generic_path = paths["/subjects/{subject_id}/measurements"]
-    generic_schema_ref = generic_path["post"]["requestBody"]["content"][
-        "application/json"
-    ]["schema"]
-    assert generic_schema_ref["discriminator"]["propertyName"] == "type"
-    generic_union_ref = generic_schema_ref["oneOf"][0]["$ref"]
-    generic_union_name = generic_union_ref.rsplit("/", 1)[-1]
-    assert "type" in schemas_by_name[generic_union_name]["properties"]
-
-    generic_list_ref = generic_path["get"]["responses"]["200"]["content"][
-        "application/json"
-    ]["schema"]["$ref"]
-    generic_list_name = generic_list_ref.rsplit("/", 1)[-1]
-    generic_items_schema = schemas_by_name[generic_list_name]["properties"]["items"][
-        "items"
-    ]
-    assert generic_items_schema["discriminator"]["propertyName"] == "type"
+    assert "/subjects/{subject_id}/measurements" not in paths
 
     detail_schema = paths["/subjects/{subject_id}/activities/{measure_id}"]["get"][
         "responses"
@@ -474,7 +483,11 @@ def test_typed_measurement_creation_rejects_mismatched_and_invalid_payloads(clie
 
     assert mismatch.status_code == 422
     assert invalid.status_code == 422
-    assert client.get(f"/subjects/{subject_id}/measurements").json()["items"] == []
+    assert (
+        client.get(f"/subjects/{subject_id}/blood_pressures")
+        .json()["items"]
+        == []
+    )
 
 
 @pytest.mark.parametrize("unsupported_type", ["heights", "unknown"])
@@ -489,11 +502,26 @@ def test_typed_routes_reject_unsupported_measurement_types(client, unsupported_t
     assert get_response.status_code == 422
 
 
+def test_generic_measurement_collection_is_no_longer_supported(client):
+    collection_url = f"/subjects/{SUBJECT_UUID}/measurements"
+    payload = SUPPORTED_MEASUREMENTS[0][1]
+
+    create_response = client.post(collection_url, json=payload)
+    list_response = client.get(collection_url)
+
+    assert create_response.status_code == 422
+    assert list_response.status_code == 422
+
+
 def test_measurement_detail_is_scoped_to_subject_and_type(client):
     subject_id = "5b0e7c52-0d1a-4c55-9a43-8f5f0f1d2a08"
     create_response = client.post(
-        f"/subjects/{subject_id}/measurements",
-        json=SUPPORTED_MEASUREMENTS[0][1],
+        f"/subjects/{subject_id}/heart_rates",
+        json={
+            key: value
+            for key, value in SUPPORTED_MEASUREMENTS[0][1].items()
+            if key != "type"
+        },
     )
     assert create_response.status_code == 201, create_response.text
     measurement_id = create_response.json()["id"]
@@ -516,7 +544,7 @@ def test_measurement_detail_is_scoped_to_subject_and_type(client):
     )
 
     legacy = client.get(f"/subjects/{subject_id}/measurements/{measurement_id}")
-    assert legacy.status_code == 405
+    assert legacy.status_code == 404
 
 
 def test_measurement_persists_after_api_restarts(api_database_environment):
