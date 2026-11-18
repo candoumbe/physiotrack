@@ -211,6 +211,7 @@ def test_orm_variants_round_trip(
         values = {
             attribute.key: getattr(stored, attribute.key)
             for attribute in sa.inspect(model_class).column_attrs
+            if attribute.key != "created_at"
         }
         values["dateOfMeasure"] = values.pop("date_of_measure")
         values["type"] = variant["type"]
@@ -284,8 +285,11 @@ def test_pydantic_variants_round_trip(variant, date, subject, measurements, engi
         connection.execute(measurements.insert().values(**values))
         stored = dict(connection.execute(sa.select(measurements)).mappings().one())
     assert stored["date_of_measure"] == model.dateOfMeasure.isoformat()
-    stored["dateOfMeasure"] = stored.pop("date_of_measure")
-    assert contract.validate_python(stored) == model
+    # Revision 0001 stores every variant in one table; unrelated fields stay NULL.
+    assert all(stored[column] is None for column in stored.keys() - values.keys())
+    payload = {column: stored[column] for column in values}
+    payload["dateOfMeasure"] = payload.pop("date_of_measure")
+    assert contract.validate_python(payload) == model
 
 
 @pytest.mark.parametrize(
