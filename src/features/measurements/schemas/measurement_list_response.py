@@ -3,18 +3,19 @@ from pydantic import BaseModel
 from . import Measurement
 
 
-class MeasurementPagination(BaseModel):
-    total: int
-    limit: int
-    offset: int
+class MeasurementLink(BaseModel):
+    href: str
+    rel: str
 
 
 class MeasurementLinks(BaseModel):
-    next: str | None
-    previous: str | None
+    prev: MeasurementLink | None
+    next: MeasurementLink | None
+    first: MeasurementLink
+    last: MeasurementLink
 
 
 class MeasurementListResponse(BaseModel):
     items: list[Measurement]
-    pagination: MeasurementPagination
+    total: int
     links: MeasurementLinks

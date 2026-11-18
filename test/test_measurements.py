@@ -14,6 +14,10 @@ from features.measurements.schemas.measurement_registry import (
     plural_resource_name,
     resolve_measurement_type,
 )
+from features.measurements.service import (
+    MeasurementPaginationConfigurationError,
+    max_measurement_limit_from_environment,
+)
 from main import create_app
 from physiotrack.database import DatabaseConfigurationError, DatabaseSettings
 
@@ -127,6 +131,12 @@ def test_create_and_list_measurements_for_subject(client):
     items = payload["items"]
     assert len(items) == 1
     assert items[0]["id"] == body["id"]
+    assert set(payload) == {"items", "links", "total"}
+    assert payload["total"] == 1
+    assert payload["links"]["first"]["href"].endswith("limit=50&offset=0")
+    assert payload["links"]["last"]["href"].endswith("limit=50&offset=0")
+    assert list_response.headers["x-count"] == "1"
+    assert list_response.headers["x-total-count"] == "1"
 
 
 def test_list_measurements_can_be_filtered_by_type(client):
@@ -176,17 +186,74 @@ def test_list_measurements_supports_pagination(client):
         )
 
     response = client.get(f"/subjects/{subject_id}/measurements?limit=2&offset=1")
-    assert response.status_code == 200, response.text
+    assert response.status_code == 206, response.text
     body = response.json()
     assert len(body["items"]) == 2
     assert [item["bpm"] for item in body["items"]] == [71, 72]
-    assert body["pagination"]["total"] == 5
-    assert body["pagination"]["limit"] == 2
-    assert body["pagination"]["offset"] == 1
-    assert "next" in body["links"]
-    assert "previous" in body["links"]
-    assert "offset=3" in body["links"]["next"]
-    assert "offset=0" in body["links"]["previous"]
+    assert body["total"] == 5
+    assert set(body) == {"items", "links", "total"}
+    assert body["links"]["next"]["rel"] == "next"
+    assert "limit=2&offset=3" in body["links"]["next"]["href"]
+    assert body["links"]["prev"]["rel"] == "prev"
+    assert "limit=2&offset=0" in body["links"]["prev"]["href"]
+    assert "limit=2&offset=0" in body["links"]["first"]["href"]
+    assert "limit=2&offset=4" in body["links"]["last"]["href"]
+    assert response.headers["x-count"] == "2"
+    assert response.headers["x-total-count"] == "5"
+    assert (
+        "<" + body["links"]["prev"]["href"] + '>; rel="prev"'
+        in response.headers["link"]
+    )
+    assert (
+        "<" + body["links"]["next"]["href"] + '>; rel="next"'
+        in response.headers["link"]
+    )
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "limit=abc",
+        "limit=1.5",
+        "limit=0",
+        "limit=-1",
+        "offset=not-an-integer",
+        "offset=-1",
+    ],
+)
+def test_measurement_pagination_rejects_invalid_values_with_bad_request(client, query):
+    response = client.get(f"/subjects/invalid-pagination/measurements?{query}")
+
+    assert response.status_code == 400
+
+
+def test_measurement_limit_defaults_to_50_and_caps_at_configured_maximum(
+    monkeypatch, api_database_environment
+):
+    monkeypatch.setenv("PHYSIOTRACK_MEASUREMENTS_MAX_LIMIT", "2")
+    subject_id = "configured-measurement-limit"
+    with TestClient(create_app()) as client:
+        for idx in range(3):
+            response = client.post(
+                f"/subjects/{subject_id}/measurements",
+                json={
+                    "type": "heart_rate",
+                    "bpm": 70 + idx,
+                    "dateOfMeasure": f"2026-09-13T12:0{idx}:00Z",
+                },
+            )
+            assert response.status_code == 201, response.text
+
+    with TestClient(create_app()) as client:
+        default_response = client.get(f"/subjects/{subject_id}/measurements")
+        capped_response = client.get(f"/subjects/{subject_id}/measurements?limit=10")
+
+    assert default_response.status_code == 206
+    assert "limit=2&offset=0" in default_response.json()["links"]["first"]["href"]
+    assert capped_response.status_code == 206
+    assert len(capped_response.json()["items"]) == 2
+    assert capped_response.json()["links"]["next"]["href"].endswith("limit=2&offset=2")
+    assert "limit=2&offset=2" in capped_response.headers["link"]
 
 
 @pytest.mark.parametrize("measurement_type,payload", SUPPORTED_MEASUREMENTS)
@@ -213,8 +280,11 @@ def test_typed_measurement_routes_dispatch_supported_types(
     assert list_response.status_code == 200, list_response.text
     body = list_response.json()
     assert [item["id"] for item in body["items"]] == [created["id"]]
-    assert body["pagination"] == {"total": 1, "limit": 1, "offset": 0}
-    assert body["links"] == {"next": None, "previous": None}
+    assert body["total"] == 1
+    assert body["links"]["prev"] is None
+    assert body["links"]["next"] is None
+    assert body["links"]["first"]["href"].endswith("limit=50&offset=0")
+    assert body["links"]["last"]["href"].endswith("limit=50&offset=0")
 
 
 def test_typed_routes_cover_the_canonical_measurement_types(client):
@@ -339,3 +409,18 @@ def test_measurement_persists_after_api_restarts(api_database_environment):
 def test_database_configuration_requires_explicit_apphost_fields():
     with pytest.raises(DatabaseConfigurationError, match="required database settings"):
         DatabaseSettings.from_environment({})
+
+
+def test_measurement_pagination_limit_configuration_defaults_and_validates():
+    assert max_measurement_limit_from_environment({}) == 200
+    assert (
+        max_measurement_limit_from_environment(
+            {"PHYSIOTRACK_MEASUREMENTS_MAX_LIMIT": "25"}
+        )
+        == 25
+    )
+    for invalid_value in ("", "0", "-1", "invalid"):
+        with pytest.raises(MeasurementPaginationConfigurationError):
+            max_measurement_limit_from_environment(
+                {"PHYSIOTRACK_MEASUREMENTS_MAX_LIMIT": invalid_value}
+            )

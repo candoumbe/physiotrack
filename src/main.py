@@ -5,7 +5,10 @@ from fastapi import FastAPI
 
 from features.health import router as health_router
 from features.measurements import router as measurements_router
-from features.measurements.service import MeasurementService
+from features.measurements.service import (
+    MeasurementService,
+    max_measurement_limit_from_environment,
+)
 from physiotrack.database import (
     DatabaseSettings,
     create_database_engine,
@@ -19,10 +22,13 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         settings = DatabaseSettings.from_environment()
+        max_measurement_limit = max_measurement_limit_from_environment()
         engine = create_database_engine(settings)
         try:
             verify_database_connection(engine)
-            app.state.measurement_service = MeasurementService(engine)
+            app.state.measurement_service = MeasurementService(
+                engine, max_limit=max_measurement_limit
+            )
             yield
         finally:
             engine.dispose()
