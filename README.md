@@ -20,7 +20,7 @@ valid aliases.
 POST /subjects/{subject_id}/{measurement_resource}
 POST /subjects/{subject_id}/measurements/{measurement_resource}
 GET  /subjects/{subject_id}/{measurement_resource}/
-GET  /subjects/{subject_id}/measurements/{measurement_id}
+GET  /subjects/{subject_id}/{measurement_resource}/{measure_id}
 GET  /subjects/{subject_id}/measurements?type={measurement_type}&limit={n}&offset={n}
 ```
 
@@ -31,6 +31,9 @@ collection routes retain the `type` discriminator because they accept or
 return multiple measurement types. Unsupported types such as `heights` are
 rejected until their measurement schemas are implemented. Collection responses
 include `items`, `total`, and pagination `links`.
+Only the typed detail route retrieves a measurement by ID. It returns `404`
+if the measurement does not belong to the requested subject and type. Creation
+responses provide a `Location` header pointing to the typed detail URL.
 Measurements are persisted in the dedicated PostgreSQL database through the
 existing migrator ORM models. API startup requires
 `PHYSIOTRACK_DATABASE_HOST`, `PHYSIOTRACK_DATABASE_PORT`,

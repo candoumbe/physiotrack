@@ -311,8 +311,12 @@ def test_typed_measurement_routes_dispatch_supported_types(
     assert "type" not in created
     assert created["subject_id"] == subject_id
     assert create_response.headers["location"] == (
-        f"/subjects/{subject_id}/measurements/{created['id']}"
+        f"/subjects/{subject_id}/{resource_name}/{created['id']}"
     )
+    for alias in (resource_name, measurement_type):
+        detail = client.get(f"/subjects/{subject_id}/{alias}/{created['id']}")
+        assert detail.status_code == 200, detail.text
+        assert detail.json() == created
 
     list_response = client.get(f"/subjects/{subject_id}/{resource_name}/")
 
@@ -443,10 +447,11 @@ def test_openapi_distinguishes_typed_and_generic_measurement_contracts(client):
     ]
     assert generic_items_schema["discriminator"]["propertyName"] == "type"
 
-    generic_item_schema = paths["/subjects/{subject_id}/measurements/{measurement_id}"][
-        "get"
-    ]["responses"]["200"]["content"]["application/json"]["schema"]
-    assert generic_item_schema["discriminator"]["propertyName"] == "type"
+    detail_schema = paths["/subjects/{subject_id}/activities/{measure_id}"]["get"][
+        "responses"
+    ]["200"]["content"]["application/json"]["schema"]
+    assert detail_schema["$ref"] == item_schema_ref
+    assert "/subjects/{subject_id}/measurements/{measurement_id}" not in paths
 
 
 def test_typed_measurement_creation_rejects_mismatched_and_invalid_payloads(client):
@@ -481,19 +486,32 @@ def test_typed_routes_reject_unsupported_measurement_types(client, unsupported_t
     assert get_response.status_code == 422
 
 
-def test_get_measurement_by_id_uses_service_storage(client):
+def test_measurement_detail_is_scoped_to_subject_and_type(client):
     subject_id = "single-measurement"
     create_response = client.post(
         f"/subjects/{subject_id}/measurements",
         json=SUPPORTED_MEASUREMENTS[0][1],
     )
+    assert create_response.status_code == 201, create_response.text
     measurement_id = create_response.json()["id"]
 
-    response = client.get(f"/subjects/{subject_id}/measurements/{measurement_id}")
-
+    expected_location = f"/subjects/{subject_id}/heart_rates/{measurement_id}"
+    assert create_response.headers["location"] == expected_location
+    response = client.get(expected_location)
     assert response.status_code == 200, response.text
     assert response.json()["id"] == measurement_id
-    assert response.json()["type"] == "heart_rate"
+    assert "type" not in response.json()
+
+    for url in (
+        f"/subjects/other-subject/heart_rates/{measurement_id}",
+        f"/subjects/{subject_id}/sleeps/{measurement_id}",
+        f"/subjects/{subject_id}/heart_rates/not-a-uuid",
+        f"/subjects/{subject_id}/measurements/heart_rates/{measurement_id}",
+    ):
+        assert client.get(url).status_code == 404
+
+    legacy = client.get(f"/subjects/{subject_id}/measurements/{measurement_id}")
+    assert legacy.status_code == 405
 
 
 def test_measurement_persists_after_api_restarts(api_database_environment):
@@ -512,7 +530,9 @@ def test_measurement_persists_after_api_restarts(api_database_environment):
         measurement_id = create_response.json()["id"]
 
     with TestClient(create_app()) as reader:
-        response = reader.get(f"/subjects/{subject_id}/measurements/{measurement_id}")
+        response = reader.get(
+            f"/subjects/{subject_id}/blood_pressures/{measurement_id}"
+        )
 
     assert response.status_code == 200, response.text
     assert response.json()["id"] == measurement_id

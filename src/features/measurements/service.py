@@ -115,27 +115,29 @@ class MeasurementService:
                 "Measurement storage is unavailable or inconsistent."
             ) from None
 
-    def get(self, subject_id: str, measurement_id: str) -> Measurement | None:
+    def get(
+        self, subject_id: str, measurement_type: MeasurementType, measurement_id: str
+    ) -> Measurement | None:
         try:
             parsed_id = UUID(measurement_id)
         except ValueError:
             return None
 
         try:
+            table_model = self._models[measurement_type]
             with Session(self._engine) as session:
-                for measurement_type, table_model in self._models.items():
-                    row = session.scalar(
-                        select(table_model).where(
-                            table_model.id == parsed_id,
-                            table_model.subject_id == subject_id,
-                        )
+                row = session.scalar(
+                    select(table_model).where(
+                        table_model.id == parsed_id,
+                        table_model.subject_id == subject_id,
                     )
-                    if row is not None:
-                        return MeasurementAdapter.validate_python(
-                            self._schema_values(measurement_type, row)
-                        )
+                )
+                if row is not None:
+                    return MeasurementAdapter.validate_python(
+                        self._schema_values(measurement_type, row)
+                    )
             return None
-        except SQLAlchemyError, ValidationError:
+        except KeyError, SQLAlchemyError, ValidationError:
             raise DatabaseUnavailable(
                 "Measurement storage is unavailable or inconsistent."
             ) from None

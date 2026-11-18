@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import Annotated
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
@@ -66,7 +66,10 @@ def _create_measurement(
         )
 
     created = measurement_service.create(subject_id, measurement)
-    response.headers["Location"] = f"/subjects/{subject_id}/measurements/{created.id}"
+    resource_name = plural_resource_name(created.type)
+    response.headers["Location"] = (
+        f"/subjects/{quote(subject_id, safe='')}/{resource_name}/{created.id}"
+    )
     return created
 
 
@@ -85,26 +88,6 @@ def create_measurement(
 ) -> Measurement:
     """Create a measurement for a subject using the legacy collection path."""
     return _create_measurement(subject_id, measurement, response, measurement_service)
-
-
-@router.get(
-    "/{subject_id}/measurements/{measurement_id}",
-    response_model=Measurement,
-)
-def get_measurement(
-    subject_id: str,
-    measurement_id: str,
-    measurement_service: Annotated[
-        MeasurementService, Depends(get_measurement_service)
-    ],
-) -> Measurement:
-    """Retrieve a subject's measurement by id."""
-    measurement = measurement_service.get(subject_id, measurement_id)
-    if measurement is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Measurement not found"
-        )
-    return measurement
 
 
 def _list_measurements(
@@ -300,6 +283,28 @@ def _typed_list_endpoint(
     return endpoint
 
 
+def _typed_detail_endpoint(
+    measurement_type: MeasurementType, model: type[MeasurementBase]
+):
+    def endpoint(
+        subject_id: str,
+        measure_id: str,
+        measurement_service: Annotated[
+            MeasurementService, Depends(get_measurement_service)
+        ],
+    ) -> MeasurementBase:
+        measurement = measurement_service.get(subject_id, measurement_type, measure_id)
+        if measurement is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Measurement not found"
+            )
+        return model.model_validate(measurement.model_dump(exclude={"type"}))
+
+    endpoint.__name__ = f"get_{measurement_type.value}_measurement"
+    endpoint.__doc__ = f"Retrieve a {measurement_type.value} measurement by id."
+    return endpoint
+
+
 for measurement_type, model in MEASUREMENT_MODELS.items():
     resource_names = dict.fromkeys(
         (measurement_type.value, plural_resource_name(measurement_type))
@@ -317,6 +322,12 @@ for measurement_type, model in MEASUREMENT_MODELS.items():
             _typed_list_endpoint(measurement_type, resource_name, model),
             methods=["GET"],
             response_model=MeasurementListResponse[model],
+        )
+        router.add_api_route(
+            f"/{{subject_id}}/{resource_name}/{{measure_id}}",
+            _typed_detail_endpoint(measurement_type, model),
+            methods=["GET"],
+            response_model=model,
         )
         router.add_api_route(
             f"/{{subject_id}}/measurements/{resource_name}",
