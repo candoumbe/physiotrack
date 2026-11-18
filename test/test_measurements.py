@@ -21,6 +21,7 @@ from features.measurements.service import (
 from main import create_app
 from physiotrack.database import DatabaseConfigurationError, DatabaseSettings
 
+SUBJECT_UUID = "5b0e7c52-0d1a-4c55-9a43-8f5f0f1d2a00"
 SUPPORTED_MEASUREMENTS = [
     (
         "heart_rate",
@@ -144,7 +145,7 @@ def test_concrete_measurement_schemas_omit_and_reject_type(model_class, values):
 
 
 def test_create_and_list_measurements_for_subject(client):
-    subject_id = "subject-123"
+    subject_id = SUBJECT_UUID
     payload = {
         "type": "heart_rate",
         "bpm": 72,
@@ -178,7 +179,7 @@ def test_create_and_list_measurements_for_subject(client):
 
 
 def test_list_measurements_can_be_filtered_by_type(client):
-    subject_id = "subject-456"
+    subject_id = "5b0e7c52-0d1a-4c55-9a43-8f5f0f1d2a01"
     client.post(
         f"/subjects/{subject_id}/measurements",
         json={
@@ -212,7 +213,7 @@ def test_list_measurements_can_be_filtered_by_type(client):
 
 
 def test_list_measurements_supports_pagination(client):
-    subject_id = "subject-789"
+    subject_id = "5b0e7c52-0d1a-4c55-9a43-8f5f0f1d2a02"
     for idx in range(5):
         client.post(
             f"/subjects/{subject_id}/measurements",
@@ -259,17 +260,19 @@ def test_list_measurements_supports_pagination(client):
         "offset=-1",
     ],
 )
-def test_measurement_pagination_rejects_invalid_values_with_bad_request(client, query):
-    response = client.get(f"/subjects/invalid-pagination/measurements?{query}")
+def test_measurement_pagination_rejects_invalid_values_with_unprocessable_entity(
+    client, query
+):
+    response = client.get(f"/subjects/{SUBJECT_UUID}/measurements?{query}")
 
-    assert response.status_code == 400
+    assert response.status_code == 422
 
 
 def test_measurement_limit_defaults_to_50_and_caps_at_configured_maximum(
     monkeypatch, api_database_environment
 ):
     monkeypatch.setenv("PHYSIOTRACK_MEASUREMENTS_MAX_LIMIT", "2")
-    subject_id = "configured-measurement-limit"
+    subject_id = "5b0e7c52-0d1a-4c55-9a43-8f5f0f1d2a03"
     with TestClient(create_app()) as client:
         for idx in range(3):
             response = client.post(
@@ -298,7 +301,7 @@ def test_measurement_limit_defaults_to_50_and_caps_at_configured_maximum(
 def test_typed_measurement_routes_dispatch_supported_types(
     client, measurement_type, payload
 ):
-    subject_id = f"typed-{measurement_type}"
+    subject_id = "5b0e7c52-0d1a-4c55-9a43-8f5f0f1d2a04"
     resource_name = plural_resource_name(schemas.MeasurementType(measurement_type))
     typed_payload = {key: value for key, value in payload.items() if key != "type"}
 
@@ -347,12 +350,12 @@ def test_typed_routes_cover_the_canonical_measurement_types(client):
     for measurement_type in schemas.MeasurementType:
         resource_name = plural_resource_name(measurement_type)
         assert resolve_measurement_type(resource_name) is measurement_type
-        response = client.get(f"/subjects/empty/{resource_name}/")
+        response = client.get(f"/subjects/{SUBJECT_UUID}/{resource_name}/")
         assert response.status_code == 200, response.text
 
 
 def test_blood_pressures_plural_collection_path(client):
-    response = client.get("/subjects/blood-pressure/blood_pressures/")
+    response = client.get(f"/subjects/{SUBJECT_UUID}/blood_pressures/")
 
     assert plural_resource_name(schemas.MeasurementType.BLOOD_PRESSURE) == (
         "blood_pressures"
@@ -361,7 +364,7 @@ def test_blood_pressures_plural_collection_path(client):
 
 
 def test_typed_routes_keep_canonical_singular_aliases(client):
-    subject_id = "typed-singular-alias"
+    subject_id = "5b0e7c52-0d1a-4c55-9a43-8f5f0f1d2a05"
     payload = {
         key: value
         for key, value in SUPPORTED_MEASUREMENTS[-1][1].items()
@@ -379,7 +382,7 @@ def test_typed_routes_keep_canonical_singular_aliases(client):
 
 
 def test_typed_measurement_creation_keeps_measurements_path_compatible(client):
-    subject_id = "typed-legacy-path"
+    subject_id = "5b0e7c52-0d1a-4c55-9a43-8f5f0f1d2a06"
     payload = {
         key: value
         for key, value in SUPPORTED_MEASUREMENTS[-1][1].items()
@@ -396,7 +399,7 @@ def test_typed_measurement_creation_keeps_measurements_path_compatible(client):
 
 def test_typed_measurement_routes_reject_a_body_discriminator(client):
     response = client.post(
-        "/subjects/typed-discriminator/heart_rates",
+        f"/subjects/{SUBJECT_UUID}/heart_rates",
         json={
             "type": "heart_rate",
             "bpm": 72,
@@ -455,7 +458,7 @@ def test_openapi_distinguishes_typed_and_generic_measurement_contracts(client):
 
 
 def test_typed_measurement_creation_rejects_mismatched_and_invalid_payloads(client):
-    subject_id = "typed-invalid"
+    subject_id = "5b0e7c52-0d1a-4c55-9a43-8f5f0f1d2a07"
     mismatch = client.post(
         f"/subjects/{subject_id}/blood_pressures/",
         json=SUPPORTED_MEASUREMENTS[0][1],
@@ -487,7 +490,7 @@ def test_typed_routes_reject_unsupported_measurement_types(client, unsupported_t
 
 
 def test_measurement_detail_is_scoped_to_subject_and_type(client):
-    subject_id = "single-measurement"
+    subject_id = "5b0e7c52-0d1a-4c55-9a43-8f5f0f1d2a08"
     create_response = client.post(
         f"/subjects/{subject_id}/measurements",
         json=SUPPORTED_MEASUREMENTS[0][1],
@@ -503,19 +506,21 @@ def test_measurement_detail_is_scoped_to_subject_and_type(client):
     assert "type" not in response.json()
 
     for url in (
-        f"/subjects/other-subject/heart_rates/{measurement_id}",
+        f"/subjects/7d1f3e2a-8b4c-4e9a-9f10-2c3b4a5d6e07/heart_rates/{measurement_id}",
         f"/subjects/{subject_id}/sleeps/{measurement_id}",
-        f"/subjects/{subject_id}/heart_rates/not-a-uuid",
         f"/subjects/{subject_id}/measurements/heart_rates/{measurement_id}",
     ):
         assert client.get(url).status_code == 404
+    assert (
+        client.get(f"/subjects/{subject_id}/heart_rates/not-a-uuid").status_code == 422
+    )
 
     legacy = client.get(f"/subjects/{subject_id}/measurements/{measurement_id}")
     assert legacy.status_code == 405
 
 
 def test_measurement_persists_after_api_restarts(api_database_environment):
-    subject_id = "persisted-subject"
+    subject_id = "5b0e7c52-0d1a-4c55-9a43-8f5f0f1d2a09"
     payload = {
         key: value
         for key, value in SUPPORTED_MEASUREMENTS[-1][1].items()

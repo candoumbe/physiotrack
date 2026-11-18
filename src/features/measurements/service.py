@@ -94,7 +94,7 @@ class MeasurementService:
             if measurement_type in schema_types
         }
 
-    def create(self, subject_id: str, measurement: Measurement) -> Measurement:
+    def create(self, subject_id: UUID, measurement: Measurement) -> Measurement:
         try:
             table_model = self._models[measurement.type]
             stored_measurement = measurement.model_copy(
@@ -116,19 +116,14 @@ class MeasurementService:
             ) from None
 
     def get(
-        self, subject_id: str, measurement_type: MeasurementType, measurement_id: str
+        self, subject_id: UUID, measurement_type: MeasurementType, measurement_id: UUID
     ) -> Measurement | None:
-        try:
-            parsed_id = UUID(measurement_id)
-        except ValueError:
-            return None
-
         try:
             table_model = self._models[measurement_type]
             with Session(self._engine) as session:
                 row = session.scalar(
                     select(table_model).where(
-                        table_model.id == parsed_id,
+                        table_model.id == measurement_id,
                         table_model.subject_id == subject_id,
                     )
                 )
@@ -144,7 +139,7 @@ class MeasurementService:
 
     def list(
         self,
-        subject_id: str,
+        subject_id: UUID,
         measurement_type: str | None,
         limit: int | None,
         offset: int,

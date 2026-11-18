@@ -14,7 +14,7 @@ class Measurement(Base):
     id: Mapped[UUID] = mapped_column(
         sa.UUID, default=uuid4, primary_key=True, sort_order=-3
     )
-    subject_id: Mapped[str | None] = mapped_column(sa.Text, sort_order=-2)
+    subject_id: Mapped[UUID | None] = mapped_column(sa.UUID, sort_order=-2)
     date_of_measure: Mapped[datetime] = mapped_column(
         MeasurementDateTime, sort_order=-1
     )
@@ -28,10 +28,6 @@ class Measurement(Base):
     def __table_args__(cls):
         return (
             sa.PrimaryKeyConstraint("id", name=f"pk_{cls.__tablename__}"),
-            sa.CheckConstraint(
-                "subject_id IS NULL OR length(subject_id) > 0",
-                name="ck_subject_nonempty",
-            ),
             *[
                 sa.CheckConstraint(
                     f"{column} NOT IN ('NaN'::numeric, 'Infinity'::numeric, "

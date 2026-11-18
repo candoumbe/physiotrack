@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import re
 from typing import Annotated
 from urllib.parse import quote, urlencode
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
@@ -21,36 +21,10 @@ from features.measurements.schemas.measurement_registry import plural_resource_n
 from features.measurements.service import MeasurementAdapter, MeasurementService
 
 router = APIRouter(prefix="/subjects", tags=["measurements"])
-_INTEGER_QUERY_PATTERN = re.compile(r"[+-]?[0-9]+\Z")
-
-
-def _parse_pagination_value(name: str, value: str) -> int:
-    if _INTEGER_QUERY_PATTERN.fullmatch(value) is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{name} must be an integer.",
-        )
-
-    try:
-        parsed = int(value)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{name} must be an integer.",
-        ) from None
-    if parsed < (1 if name == "limit" else 0):
-        requirement = (
-            "a positive integer" if name == "limit" else "a non-negative integer"
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{name} must be {requirement}.",
-        )
-    return parsed
 
 
 def _create_measurement(
-    subject_id: str,
+    subject_id: UUID,
     measurement: Measurement,
     response: Response,
     measurement_service: MeasurementService,
@@ -68,7 +42,7 @@ def _create_measurement(
     created = measurement_service.create(subject_id, measurement)
     resource_name = plural_resource_name(created.type)
     response.headers["Location"] = (
-        f"/subjects/{quote(subject_id, safe='')}/{resource_name}/{created.id}"
+        f"/subjects/{quote(str(subject_id), safe='')}/{resource_name}/{created.id}"
     )
     return created
 
@@ -79,7 +53,7 @@ def _create_measurement(
     response_model=Measurement,
 )
 def create_measurement(
-    subject_id: str,
+    subject_id: UUID,
     measurement: Measurement,
     response: Response,
     measurement_service: Annotated[
@@ -91,7 +65,7 @@ def create_measurement(
 
 
 def _list_measurements(
-    subject_id: str,
+    subject_id: UUID,
     path: str,
     measurement_type: str | None,
     limit: int | None,
@@ -165,7 +139,7 @@ def _list_measurements(
     response_model=MeasurementListResponse[Measurement],
 )
 def list_measurements(
-    subject_id: str,
+    subject_id: UUID,
     measurement_service: Annotated[
         MeasurementService, Depends(get_measurement_service)
     ],
@@ -174,27 +148,20 @@ def list_measurements(
         str | None, Query(description="Filter measurements by type")
     ] = None,
     limit: Annotated[
-        str | None,
-        Query(description="Maximum number of measurements to return"),
+        int | None,
+        Query(ge=1, description="Maximum number of measurements to return"),
     ] = None,
     offset: Annotated[
-        str | None, Query(description="Number of measurements to skip")
-    ] = None,
+        int, Query(ge=0, description="Number of measurements to skip")
+    ] = 0,
 ) -> MeasurementListResponse[Measurement]:
     """List a subject's measurements using the legacy collection path."""
-
-    parsed_limit = (
-        _parse_pagination_value("limit", limit) if limit is not None else None
-    )
-    parsed_offset = (
-        _parse_pagination_value("offset", offset) if offset is not None else 0
-    )
     return _list_measurements(
         subject_id,
         f"/subjects/{subject_id}/measurements",
         type,
-        parsed_limit,
-        parsed_offset,
+        limit,
+        offset,
         measurement_service,
         response,
     )
@@ -204,7 +171,7 @@ def _typed_create_endpoint(
     measurement_type: MeasurementType, model: type[MeasurementBase]
 ):
     def endpoint(
-        subject_id: str,
+        subject_id: UUID,
         measurement: MeasurementBase,
         response: Response,
         measurement_service: MeasurementService,
@@ -226,7 +193,7 @@ def _typed_create_endpoint(
         f"Create a {measurement_type.value} measurement without a body discriminator."
     )
     endpoint.__annotations__ = {
-        "subject_id": str,
+        "subject_id": UUID,
         "measurement": model,
         "response": Response,
         "measurement_service": Annotated[
@@ -241,24 +208,18 @@ def _typed_list_endpoint(
     measurement_type: MeasurementType, resource_name: str, model: type[MeasurementBase]
 ):
     def endpoint(
-        subject_id: str,
+        subject_id: UUID,
         response: Response,
         measurement_service: MeasurementService,
-        limit: str | None = None,
-        offset: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> MeasurementListResponse[Measurement]:
-        parsed_limit = (
-            _parse_pagination_value("limit", limit) if limit is not None else None
-        )
-        parsed_offset = (
-            _parse_pagination_value("offset", offset) if offset is not None else 0
-        )
         return _list_measurements(
             subject_id,
             f"/subjects/{subject_id}/{resource_name}",
             measurement_type.value,
-            parsed_limit,
-            parsed_offset,
+            limit,
+            offset,
             measurement_service,
             response,
             model,
@@ -267,16 +228,17 @@ def _typed_list_endpoint(
     endpoint.__name__ = f"list_{measurement_type.value}_measurements"
     endpoint.__doc__ = f"List {measurement_type.value} measurements."
     endpoint.__annotations__ = {
-        "subject_id": str,
+        "subject_id": UUID,
         "response": Response,
         "measurement_service": Annotated[
             MeasurementService, Depends(get_measurement_service)
         ],
         "limit": Annotated[
-            str | None, Query(description="Maximum number of measurements to return")
+            int | None,
+            Query(ge=1, description="Maximum number of measurements to return"),
         ],
         "offset": Annotated[
-            str | None, Query(description="Number of measurements to skip")
+            int, Query(ge=0, description="Number of measurements to skip")
         ],
         "return": MeasurementListResponse[model],
     }
@@ -287,8 +249,8 @@ def _typed_detail_endpoint(
     measurement_type: MeasurementType, model: type[MeasurementBase]
 ):
     def endpoint(
-        subject_id: str,
-        measure_id: str,
+        subject_id: UUID,
+        measure_id: UUID,
         measurement_service: Annotated[
             MeasurementService, Depends(get_measurement_service)
         ],

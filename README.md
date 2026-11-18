@@ -14,7 +14,9 @@ identifier.
 Measurement routes use resource names derived from the supported variants in
 `MeasurementType`: `heart_rates`, `sleeps`, `activities`, and
 `blood_pressures`. Canonical singular values such as `blood_pressure` remain
-valid aliases.
+valid aliases. `subject_id` and `measure_id` are UUIDs; a value that is not a
+UUID returns `422`. `limit` and `offset` are integers (`limit >= 1`,
+`offset >= 0`); invalid values return `422`.
 
 ```text
 POST /subjects/{subject_id}/{measurement_resource}
@@ -179,6 +181,8 @@ and their data, never the database. Revision `0002_dedicated_measurements` safel
 splits existing measurements by type; rollback to `0001_measurements` merges
 them without loss when IDs remain globally unique. Revision
 `0003_measurement_creation_order` adds server-generated creation timestamps for
-stable API collection ordering. See the migrator guide for the safety checks
+stable API collection ordering. Revision `0004_subject_id_uuid` converts
+`subject_id` to the PostgreSQL `uuid` type; it refuses to run if any existing
+row holds a non-UUID value. See the migrator guide for the safety checks
 and limitations. The migrator has its own lockfile, tests and non-server Docker
 image; its ORM models are also used by the API persistence service.

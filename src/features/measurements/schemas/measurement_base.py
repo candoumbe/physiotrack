@@ -10,5 +10,5 @@ class MeasurementBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: UUID = Field(default_factory=uuid4)
-    subject_id: str | None = Field(default=None, min_length=1)
+    subject_id: UUID | None = None
     dateOfMeasure: datetime

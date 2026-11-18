@@ -246,7 +246,7 @@ and blood pressure `unit` to `mmHg`; these are client-side defaults, not new
 database defaults.
 Integer fields load as Python `int`, and dates bind/load as `datetime` using the
 existing lossless `NUMERIC` and ISO-8601 `TEXT` storage. These models match
-revision `0003_measurement_creation_order`.
+revision `0004_subject_id_uuid`; `subject_id` is a `UUID` column.
 
 ## Separate container
 

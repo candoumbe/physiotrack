@@ -51,8 +51,8 @@ def test_create_delete_round_trip_without_database(source_checkout, capsys):
     assert cli.main(["create", "--message", message]) == 0
     scripts = ScriptDirectory(str(source_checkout))
     head = scripts.get_revision(scripts.get_current_head())
-    assert head.revision != "0003_measurement_creation_order"
-    assert head.down_revision == "0003_measurement_creation_order"
+    assert head.revision != "0004_subject_id_uuid"
+    assert head.down_revision == "0004_subject_id_uuid"
     assert head.doc == message
     assert head.module.upgrade() is None
     assert head.module.downgrade() is None
@@ -96,7 +96,7 @@ def test_up_dispatches_internal_provisioning_without_printing_secrets(
                     revision,
                 )
             )
-            or "0003_measurement_creation_order"
+            or "0004_subject_id_uuid"
         ),
     )
     monkeypatch.setattr(
@@ -106,7 +106,7 @@ def test_up_dispatches_internal_provisioning_without_printing_secrets(
     assert cli.main(["up"]) == 0
     output = capsys.readouterr()
     assert calls == [("physiotrack_migrator", "postgres", "head")]
-    assert output.out.strip() == "revision: 0003_measurement_creation_order"
+    assert output.out.strip() == "revision: 0004_subject_id_uuid"
     assert admin_password not in output.out + output.err
     assert migrator_password not in output.out + output.err
 
@@ -139,12 +139,12 @@ def test_runner_provisions_before_migrating_with_restricted_runtime_settings(
         "migrate",
         lambda value, action, revision: (
             calls.append(("migrate", value.runtime_url.username, action, revision))
-            or "0003_measurement_creation_order"
+            or "0004_subject_id_uuid"
         ),
     )
 
     assert runner.provision_and_migrate(settings, "head", provisioning) == (
-        "0003_measurement_creation_order"
+        "0004_subject_id_uuid"
     )
     assert calls == [
         ("provision", "postgres"),
@@ -170,7 +170,7 @@ def test_up_without_bootstrap_keeps_existing_runtime_migration_path(monkeypatch)
         "migrate",
         lambda settings, action, revision: (
             calls.append((settings.runtime_url.username, action, revision))
-            or "0003_measurement_creation_order"
+            or "0004_subject_id_uuid"
         ),
     )
 
@@ -404,7 +404,7 @@ def test_make_create_delete_preserves_message(source_checkout, message, monkeypa
     scripts = ScriptDirectory(str(source_checkout))
     head = scripts.get_revision(scripts.get_current_head())
     assert head.module.__doc__ == message
-    assert head.down_revision == "0003_measurement_creation_order"
+    assert head.down_revision == "0004_subject_id_uuid"
     assert not (working / "shell-marker").exists()
     assert not (working / "make-marker").exists()
     result = subprocess.run(
@@ -496,7 +496,7 @@ config = runner.migration_config()
 command.revision(config, message='packaged template')
 scripts = ScriptDirectory.from_config(config)
 head = scripts.get_revision(scripts.get_current_head())
-assert head.down_revision == '0003_measurement_creation_order'
+assert head.down_revision == '0004_subject_id_uuid'
 assert head.module.__doc__ == 'packaged template'
 assert head.module.upgrade() is None
 assert head.module.downgrade() is None

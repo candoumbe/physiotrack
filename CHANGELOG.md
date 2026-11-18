@@ -16,8 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-root Docker image and disposable PostgreSQL contract tests.
 - Added migration `0003_measurement_creation_order` with server-generated
   creation timestamps for stable measurement ordering across types and API restarts.
+- Added migration `0004_subject_id_uuid` converting `subject_id` to the `uuid` type.
+  It refuses to run when existing rows contain a non-UUID `subject_id`.
 
 #### API
+
+- Changed `subject_id` and `measure_id` path parameters to UUIDs; malformed values
+  now return `422` (previously `404` for `measure_id`).
+- Changed `limit` and `offset` query parameters to integers validated by FastAPI
+  (`limit >= 1`, `offset >= 0`); invalid values now return `422` instead of `400`.
 
 - Added `GET /health` endpoint returning API status and timestamp
 - Standardized HTTP error responses as RFC 7807 Problem Details with the

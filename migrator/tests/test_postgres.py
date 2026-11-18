@@ -15,7 +15,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from pydantic import TypeAdapter
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 
 from physiotrack_migrator import cli
@@ -39,8 +39,10 @@ from physiotrack_migrator.runner import (
     provision,
 )
 
+SYNTHETIC_SUBJECT = "5b0e7c52-0d1a-4c55-9a43-8f5f0f1d2a10"
+
 pytestmark = pytest.mark.integration
-HEAD = "0003_measurement_creation_order"
+HEAD = "0004_subject_id_uuid"
 INITIAL = "0001_measurements"
 TABLES = {
     "heart_rate_measurements",
@@ -191,7 +193,7 @@ def test_orm_metadata_matches_migration(database, engine):
         "2026-10-28T11:58:53Z",
     ],
 )
-@pytest.mark.parametrize("subject", [None, "synthetic-subject"])
+@pytest.mark.parametrize("subject", [None, SYNTHETIC_SUBJECT])
 def test_orm_variants_round_trip(
     model_class, variant, date, subject, dedicated, engine
 ):
@@ -272,7 +274,7 @@ def test_orm_defaults_and_update(dedicated, engine):
         "2026-10-28T11:58:53Z",
     ],
 )
-@pytest.mark.parametrize("subject", [None, "synthetic-subject"])
+@pytest.mark.parametrize("subject", [None, SYNTHETIC_SUBJECT])
 def test_pydantic_variants_round_trip(variant, date, subject, measurements, engine):
     contract = adapter()
     model = contract.validate_python(
@@ -299,7 +301,6 @@ def test_pydantic_variants_round_trip(variant, date, subject, measurements, engi
         {"bpm": None},
         {"date_of_measure": None},
         {"id": None},
-        {"subject_id": ""},
         {"steps": 1},
         {"quality_score": 0.5},
         {"unit": "mmHg"},
@@ -759,7 +760,7 @@ def test_populated_split_and_merge_preserve_every_field(
             connection.execute(
                 measurements.insert().values(
                     id=uuid4(),
-                    subject_id=None if index % 2 else "synthetic-subject",
+                    subject_id=None if index % 2 else SYNTHETIC_SUBJECT,
                     date_of_measure="2026-10-30T15:47:07.123456"
                     + ("+05:30" if index % 2 else ""),
                     **row,
@@ -869,7 +870,7 @@ def test_dedicated_constraints(
         "date_of_measure": datetime(2026, 10, 30, tzinfo=UTC),
         **values,
     }
-    invalid = [{"subject_id": ""}, {"id": None}, {"date_of_measure": None}]
+    invalid = [{"id": None}, {"date_of_measure": None}]
     invalid.extend(
         {field: value}
         for field in integer_fields
@@ -883,6 +884,35 @@ def test_dedicated_constraints(
     with engine.begin() as connection:
         connection.execute(model.__table__.insert().values(**row))
     with pytest.raises(IntegrityError), engine.begin() as connection:
+        connection.execute(model.__table__.insert().values(**row))
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        HeartRateMeasurement,
+        SleepMeasurement,
+        ActivityMeasurement,
+        BloodPressureMeasurement,
+    ],
+)
+def test_dedicated_subject_id_must_be_a_uuid(database, dedicated, engine, model):
+    row = {
+        "id": uuid4(),
+        "date_of_measure": datetime(2026, 10, 30, tzinfo=UTC),
+        "subject_id": "not-a-uuid",
+        **{
+            HeartRateMeasurement: {"bpm": 72},
+            SleepMeasurement: {"duration_minutes": 420},
+            ActivityMeasurement: {"steps": 1000},
+            BloodPressureMeasurement: {
+                "systolic": 120,
+                "diastolic": 80,
+                "unit": "mmHg",
+            },
+        }[model],
+    }
+    with pytest.raises(DataError), engine.begin() as connection:
         connection.execute(model.__table__.insert().values(**row))
 
 
