@@ -39,7 +39,13 @@ def test_package_import_registers_dedicated_tables():
     assert inspect(models.Measurement, raiseerr=False) is None
     for name, fields in expected.items():
         table = models.Base.metadata.tables[name]
-        assert set(table.c.keys()) == {"id", "subject_id", "date_of_measure", *fields}
+        assert set(table.c.keys()) == {
+            "id",
+            "subject_id",
+            "date_of_measure",
+            "created_at",
+            *fields,
+        }
         for column in table.c:
             assert column.nullable == (
                 column.name in {"subject_id", "quality_score", "calories"}

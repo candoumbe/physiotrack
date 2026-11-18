@@ -1,30 +1,37 @@
-"""Common schema for physiological measurements and its type-specific variants.
-
-Skeleton only - illustrates the discriminated-union structure. Full set of
-fields per measurement type will be finalized by Backend Dev / Data Engineer.
-"""
+"""Type-specific measurement schemas and the generic discriminated union."""
 
 from typing import Annotated
 
 from pydantic import Field
 
-from .activity_measurement import ActivityMeasurement
-from .blood_pressure_measurement import BloodPressureMeasurement
-from .heart_rate_measurement import HeartRateMeasurement
+from .activity_measurement import ActivityMeasurement, ActivityMeasurementWithType
+from .blood_pressure_measurement import (
+    BloodPressureMeasurement,
+    BloodPressureMeasurementWithType,
+)
+from .heart_rate_measurement import HeartRateMeasurement, HeartRateMeasurementWithType
 from .measurement_base import MeasurementBase
 from .measurement_type import MeasurementType
 from .measurement_value import MeasurementValue
-from .sleep_measurement import SleepMeasurement
+from .sleep_measurement import SleepMeasurement, SleepMeasurementWithType
 
 Measurement = Annotated[
-    HeartRateMeasurement
-    | SleepMeasurement
-    | ActivityMeasurement
-    | BloodPressureMeasurement,
+    HeartRateMeasurementWithType
+    | SleepMeasurementWithType
+    | ActivityMeasurementWithType
+    | BloodPressureMeasurementWithType,
     Field(discriminator="type"),
 ]
 
+MEASUREMENT_MODELS = {
+    MeasurementType.HEART_RATE: HeartRateMeasurement,
+    MeasurementType.SLEEP: SleepMeasurement,
+    MeasurementType.ACTIVITY: ActivityMeasurement,
+    MeasurementType.BLOOD_PRESSURE: BloodPressureMeasurement,
+}
+
 __all__ = [
+    "MEASUREMENT_MODELS",
     "ActivityMeasurement",
     "BloodPressureMeasurement",
     "HeartRateMeasurement",

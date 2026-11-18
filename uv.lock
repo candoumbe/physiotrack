@@ -470,6 +470,9 @@ dependencies = [
     { name = "opentelemetry-instrumentation-fastapi" },
     { name = "opentelemetry-instrumentation-logging" },
     { name = "opentelemetry-sdk" },
+    { name = "physiotrack-migrator" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -477,7 +480,6 @@ dependencies = [
 dev = [
     { name = "alembic" },
     { name = "httpx" },
-    { name = "physiotrack-migrator" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -490,6 +492,9 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-fastapi", specifier = ">=0.65b0" },
     { name = "opentelemetry-instrumentation-logging", specifier = ">=0.65b0" },
     { name = "opentelemetry-sdk", specifier = ">=1.44.0" },
+    { name = "physiotrack-migrator", editable = "migrator" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.3,<4" },
+    { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "uvicorn", extras = ["standard"] },
 ]
 
@@ -497,7 +502,6 @@ requires-dist = [
 dev = [
     { name = "alembic", specifier = ">=1.18,<2" },
     { name = "httpx" },
-    { name = "physiotrack-migrator", editable = "migrator" },
     { name = "pytest" },
     { name = "ruff", specifier = ">=0.16.7" },
 ]

@@ -1,13 +1,39 @@
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from features.health import router as health_router
 from features.measurements import router as measurements_router
+from features.measurements.service import (
+    MeasurementService,
+    max_measurement_limit_from_environment,
+)
+from physiotrack.database import (
+    DatabaseSettings,
+    create_database_engine,
+    verify_database_connection,
+)
 from physiotrack.problem_details import register_problem_details_handlers
 from telemetry import setup_telemetry
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="PhysioTrack API")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+        settings = DatabaseSettings.from_environment()
+        max_measurement_limit = max_measurement_limit_from_environment()
+        engine = create_database_engine(settings)
+        try:
+            verify_database_connection(engine)
+            app.state.measurement_service = MeasurementService(
+                engine, max_limit=max_measurement_limit
+            )
+            yield
+        finally:
+            engine.dispose()
+
+    app = FastAPI(title="PhysioTrack API", lifespan=lifespan)
     register_problem_details_handlers(app)
     app.include_router(health_router)
     app.include_router(measurements_router)

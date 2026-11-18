@@ -8,10 +8,11 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/app/.venv
 
 WORKDIR /app
-
 COPY pyproject.toml uv.lock ./
+COPY migrator/pyproject.toml ./migrator/
+COPY migrator/src/ ./migrator/src/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+    uv sync --frozen --no-dev --no-install-project --no-editable
 
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
