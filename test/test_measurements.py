@@ -5,7 +5,7 @@ from typing import get_args
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -76,33 +76,71 @@ def test_schema_package_reexports(name, module_name):
 
 
 @pytest.mark.parametrize(
-    "model_class,variant",
+    "model_class,generic_model_class,variant",
     [
-        (schemas.HeartRateMeasurement, {"type": "heart_rate", "bpm": 72}),
-        (schemas.SleepMeasurement, {"type": "sleep", "duration_minutes": 420}),
-        (schemas.ActivityMeasurement, {"type": "activity", "steps": 1000}),
+        (
+            schemas.HeartRateMeasurement,
+            schemas.HeartRateMeasurementWithType,
+            {"type": "heart_rate", "bpm": 72},
+        ),
+        (
+            schemas.SleepMeasurement,
+            schemas.SleepMeasurementWithType,
+            {"type": "sleep", "duration_minutes": 420},
+        ),
+        (
+            schemas.ActivityMeasurement,
+            schemas.ActivityMeasurementWithType,
+            {"type": "activity", "steps": 1000},
+        ),
         (
             schemas.BloodPressureMeasurement,
+            schemas.BloodPressureMeasurementWithType,
             {"type": "blood_pressure", "systolic": 120, "diastolic": 80},
         ),
     ],
 )
-def test_schema_union_round_trip(model_class, variant):
+def test_schema_union_round_trip(model_class, generic_model_class, variant):
     contract = TypeAdapter(schemas.Measurement)
     model = contract.validate_python(
         {**variant, "dateOfMeasure": "2026-10-30T15:25:42Z"}
     )
-    assert type(model) is model_class
+    assert type(model) is generic_model_class
+    assert isinstance(model, model_class)
     assert contract.validate_json(contract.dump_json(model)) == model
     assert contract.json_schema()["discriminator"] == {
         "propertyName": "type",
         "mapping": {
-            "heart_rate": "#/$defs/HeartRateMeasurement",
-            "sleep": "#/$defs/SleepMeasurement",
-            "activity": "#/$defs/ActivityMeasurement",
-            "blood_pressure": "#/$defs/BloodPressureMeasurement",
+            "heart_rate": "#/$defs/HeartRateMeasurementWithType",
+            "sleep": "#/$defs/SleepMeasurementWithType",
+            "activity": "#/$defs/ActivityMeasurementWithType",
+            "blood_pressure": "#/$defs/BloodPressureMeasurementWithType",
         },
     }
+
+
+@pytest.mark.parametrize(
+    "model_class,values",
+    [
+        (schemas.HeartRateMeasurement, {"bpm": 72}),
+        (schemas.SleepMeasurement, {"duration_minutes": 420}),
+        (schemas.ActivityMeasurement, {"steps": 1000}),
+        (
+            schemas.BloodPressureMeasurement,
+            {"systolic": 120, "diastolic": 80},
+        ),
+    ],
+)
+def test_concrete_measurement_schemas_omit_and_reject_type(model_class, values):
+    values = {**values, "dateOfMeasure": "2026-10-30T15:25:42Z"}
+
+    measurement = model_class.model_validate(values)
+
+    assert "type" not in model_class.model_fields
+    assert "type" not in model_class.model_json_schema()["properties"]
+    assert "type" not in measurement.model_dump()
+    with pytest.raises(ValidationError):
+        model_class.model_validate({**values, "type": "heart_rate"})
 
 
 def test_create_and_list_measurements_for_subject(client):
@@ -262,14 +300,15 @@ def test_typed_measurement_routes_dispatch_supported_types(
 ):
     subject_id = f"typed-{measurement_type}"
     resource_name = plural_resource_name(schemas.MeasurementType(measurement_type))
+    typed_payload = {key: value for key, value in payload.items() if key != "type"}
 
     create_response = client.post(
-        f"/subjects/{subject_id}/{resource_name}/", json=payload
+        f"/subjects/{subject_id}/{resource_name}/", json=typed_payload
     )
 
     assert create_response.status_code == 201, create_response.text
     created = create_response.json()
-    assert created["type"] == measurement_type
+    assert "type" not in created
     assert created["subject_id"] == subject_id
     assert create_response.headers["location"] == (
         f"/subjects/{subject_id}/measurements/{created['id']}"
@@ -280,6 +319,7 @@ def test_typed_measurement_routes_dispatch_supported_types(
     assert list_response.status_code == 200, list_response.text
     body = list_response.json()
     assert [item["id"] for item in body["items"]] == [created["id"]]
+    assert "type" not in body["items"][0]
     assert body["total"] == 1
     assert body["links"]["prev"] is None
     assert body["links"]["next"] is None
@@ -318,7 +358,11 @@ def test_blood_pressures_plural_collection_path(client):
 
 def test_typed_routes_keep_canonical_singular_aliases(client):
     subject_id = "typed-singular-alias"
-    payload = SUPPORTED_MEASUREMENTS[-1][1]
+    payload = {
+        key: value
+        for key, value in SUPPORTED_MEASUREMENTS[-1][1].items()
+        if key != "type"
+    }
 
     create_response = client.post(
         f"/subjects/{subject_id}/blood_pressure/", json=payload
@@ -332,14 +376,77 @@ def test_typed_routes_keep_canonical_singular_aliases(client):
 
 def test_typed_measurement_creation_keeps_measurements_path_compatible(client):
     subject_id = "typed-legacy-path"
-    payload = SUPPORTED_MEASUREMENTS[-1][1]
+    payload = {
+        key: value
+        for key, value in SUPPORTED_MEASUREMENTS[-1][1].items()
+        if key != "type"
+    }
 
     create_response = client.post(
         f"/subjects/{subject_id}/measurements/blood_pressure", json=payload
     )
 
     assert create_response.status_code == 201, create_response.text
-    assert create_response.json()["type"] == "blood_pressure"
+    assert "type" not in create_response.json()
+
+
+def test_typed_measurement_routes_reject_a_body_discriminator(client):
+    response = client.post(
+        "/subjects/typed-discriminator/heart_rates",
+        json={
+            "type": "heart_rate",
+            "bpm": 72,
+            "dateOfMeasure": "2026-09-13T12:00:00Z",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_openapi_distinguishes_typed_and_generic_measurement_contracts(client):
+    openapi = client.get("/openapi.json").json()
+    paths = openapi["paths"]
+    schemas_by_name = openapi["components"]["schemas"]
+
+    typed_path = paths["/subjects/{subject_id}/activities"]
+    create_schema_ref = typed_path["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]["$ref"]
+    create_schema_name = create_schema_ref.rsplit("/", 1)[-1]
+    assert "type" not in schemas_by_name[create_schema_name]["properties"]
+
+    list_schema_ref = typed_path["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]["$ref"]
+    list_schema_name = list_schema_ref.rsplit("/", 1)[-1]
+    item_schema_ref = schemas_by_name[list_schema_name]["properties"]["items"]["items"][
+        "$ref"
+    ]
+    item_schema_name = item_schema_ref.rsplit("/", 1)[-1]
+    assert "type" not in schemas_by_name[item_schema_name]["properties"]
+
+    generic_path = paths["/subjects/{subject_id}/measurements"]
+    generic_schema_ref = generic_path["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]
+    assert generic_schema_ref["discriminator"]["propertyName"] == "type"
+    generic_union_ref = generic_schema_ref["oneOf"][0]["$ref"]
+    generic_union_name = generic_union_ref.rsplit("/", 1)[-1]
+    assert "type" in schemas_by_name[generic_union_name]["properties"]
+
+    generic_list_ref = generic_path["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]["$ref"]
+    generic_list_name = generic_list_ref.rsplit("/", 1)[-1]
+    generic_items_schema = schemas_by_name[generic_list_name]["properties"]["items"][
+        "items"
+    ]
+    assert generic_items_schema["discriminator"]["propertyName"] == "type"
+
+    generic_item_schema = paths["/subjects/{subject_id}/measurements/{measurement_id}"][
+        "get"
+    ]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert generic_item_schema["discriminator"]["propertyName"] == "type"
 
 
 def test_typed_measurement_creation_rejects_mismatched_and_invalid_payloads(client):
@@ -386,11 +493,16 @@ def test_get_measurement_by_id_uses_service_storage(client):
 
     assert response.status_code == 200, response.text
     assert response.json()["id"] == measurement_id
+    assert response.json()["type"] == "heart_rate"
 
 
 def test_measurement_persists_after_api_restarts(api_database_environment):
     subject_id = "persisted-subject"
-    payload = SUPPORTED_MEASUREMENTS[-1][1]
+    payload = {
+        key: value
+        for key, value in SUPPORTED_MEASUREMENTS[-1][1].items()
+        if key != "type"
+    }
     with TestClient(create_app()) as writer:
         create_response = writer.post(
             f"/subjects/{subject_id}/measurements/blood_pressures",

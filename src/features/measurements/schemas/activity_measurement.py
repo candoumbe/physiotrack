@@ -5,6 +5,9 @@ from .measurement_type import MeasurementType
 
 
 class ActivityMeasurement(MeasurementBase):
-    type: Literal[MeasurementType.ACTIVITY] = MeasurementType.ACTIVITY
     steps: int
     calories: float | None = None
+
+
+class ActivityMeasurementWithType(ActivityMeasurement):
+    type: Literal[MeasurementType.ACTIVITY] = MeasurementType.ACTIVITY

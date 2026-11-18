@@ -1,7 +1,5 @@
 from pydantic import BaseModel
 
-from . import Measurement
-
 
 class MeasurementLink(BaseModel):
     href: str
@@ -15,7 +13,7 @@ class MeasurementLinks(BaseModel):
     last: MeasurementLink
 
 
-class MeasurementListResponse(BaseModel):
-    items: list[Measurement]
+class MeasurementListResponse[MeasurementItem](BaseModel):
+    items: list[MeasurementItem]
     total: int
     links: MeasurementLinks

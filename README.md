@@ -13,12 +13,11 @@ identifier.
 
 Measurement routes use resource names derived from the supported variants in
 `MeasurementType`: `heart_rates`, `sleeps`, `activities`, and
-`blood_pressures`. A new measurement variant registered in the schema union
-and `MeasurementType` is available through the generic typed routes without
-adding endpoint-specific branches. Canonical singular values such as
-`blood_pressure` remain valid aliases.
+`blood_pressures`. Canonical singular values such as `blood_pressure` remain
+valid aliases.
 
 ```text
+POST /subjects/{subject_id}/{measurement_resource}
 POST /subjects/{subject_id}/measurements/{measurement_resource}
 GET  /subjects/{subject_id}/{measurement_resource}/
 GET  /subjects/{subject_id}/measurements/{measurement_id}
@@ -26,10 +25,12 @@ GET  /subjects/{subject_id}/measurements?type={measurement_type}&limit={n}&offse
 ```
 
 The legacy `POST /subjects/{subject_id}/measurements` and collection `GET`
-remain available. Typed creation validates that the body discriminator matches
-the URL type. Unsupported types such as `heights` are rejected until their
-measurement schemas are implemented. Collection responses include `items`,
-`pagination` (`total`, `limit`, `offset`), and `links` (`next`, `previous`).
+remain available. Typed routes validate the body against the URL type's
+measurement schema; their request and response bodies omit `type`. The generic
+collection routes retain the `type` discriminator because they accept or
+return multiple measurement types. Unsupported types such as `heights` are
+rejected until their measurement schemas are implemented. Collection responses
+include `items`, `total`, and pagination `links`.
 Measurements are persisted in the dedicated PostgreSQL database through the
 existing migrator ORM models. API startup requires
 `PHYSIOTRACK_DATABASE_HOST`, `PHYSIOTRACK_DATABASE_PORT`,
